@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     channel3_api_key: str = ""
     database_url: str = "sqlite:///./gawah.db"
     ledger_signing_key_path: str = ""
+    # Service keys: one per calling service (the UI uses SYSTEM3_KEY).
+    system1_key: str = ""
+    system3_key: str = ""
+    # When true (default), /v1 endpoints return fixtures instead of running real logic.
+    gawah_mock: bool = True
 
 
 settings = Settings()
