@@ -103,3 +103,18 @@ class EvidencePack(Base):
     fingerprint: Mapped[str] = mapped_column(String(64))
     generated_at: Mapped[datetime] = mapped_column(UTCDateTime())
     snapshot: Mapped[dict] = mapped_column(JSON)
+
+
+class CounselAnalysis(Base):
+    __tablename__ = "counsel_analyses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    payment_id: Mapped[str] = mapped_column(String(255), index=True)
+    dispute_id: Mapped[int | None] = mapped_column(ForeignKey("disputes.id"))
+    evidence_pack_id: Mapped[int] = mapped_column(ForeignKey("evidence_packs.id"), index=True)
+    evidence_pack_version: Mapped[int]
+    analysis_status: Mapped[str] = mapped_column(String(24))
+    review_status: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    snapshot: Mapped[dict] = mapped_column(JSON)

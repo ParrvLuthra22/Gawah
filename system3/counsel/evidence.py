@@ -16,6 +16,9 @@ from .evidence_schemas import (
     EvidencePackResponse,
     EvidenceSnapshot,
     SourceCheck,
+    SourceSystem,
+    SourceType,
+    Verification,
 )
 from .models import Dispute, EvidencePack, Source, now
 from .schemas import DisputeSummary
@@ -57,9 +60,19 @@ def normalize(
     assert data.verification is not None
     paypal_id = dispute.paypal_dispute_id if dispute else None
     items: dict[str, EvidenceItem] = {}
+    verification = data.verification
+    bundle_path = f"/v1/evidence/{payment_id}"
 
     def add(
-        name, key, model, record_id, original_time, reference, status="UNAVAILABLE", source=None
+        name,
+        key,
+        model,
+        record_id,
+        original_time,
+        reference,
+        check: Verification | None = None,
+        source: SourceSystem | None = None,
+        source_type: SourceType | None = None,
     ):
         if model is None:
             return
@@ -73,13 +86,15 @@ def normalize(
             id=f"{name}:{record_id}",
             type=name,
             source_system=source or data.source,
+            source_type=source_type or data.source_type,
             source_record_id=str(record_id),
             source_reference=reference,
             dispute_id=paypal_id,
             payment_id=payment_id,
             timestamp=timestamp(original_time),
             retrieved_at=retrieved,
-            verification_status=status,
+            verification_status=check.status if check else "UNVERIFIED",
+            verification=check,
             payload=model.model_dump(mode="json", exclude=exclusions.get(name)),
         )
 
@@ -89,23 +104,38 @@ def normalize(
         ("signed_cart", "cart_id", None),
         ("decision", "id", "checked_at"),
         ("payment", "id", "created_at"),
-        ("merchant_key", "key_id", None),
     ):
         record = data.records.get(name)
         if record is None:
             continue
-        status = data.verification.cart_signature.status if name == "signed_cart" else "UNAVAILABLE"
+        check = {
+            "mandate": verification.mandate_signature,
+            "signed_cart": verification.cart_signature,
+            "payment": verification.payment_reference_match,
+        }.get(name)
+        reference = data.references[name]
+        if (
+            check
+            and reference != f"{bundle_path}#{name}"
+            and check.status in {"VERIFIED", "INVALID"}
+        ):
+            check = None
         add(
             name,
             name,
             record,
             getattr(record, record_id),
             getattr(record, time_field) if time_field else None,
-            data.references[name],
-            status,
+            reference,
+            check,
         )
     if dispute:
         reference = f"/api/disputes/{dispute.id}"
+        dispute_source = {
+            Source.PAYPAL_API: "REAL_RECORD",
+            Source.SIMULATED_FIXTURE: "SIMULATED_FIXTURE",
+            Source.MOCK_ENGINE: "MOCK_RESPONSE",
+        }[dispute.source]
         add(
             "dispute",
             "dispute",
@@ -114,6 +144,7 @@ def normalize(
             dispute.created_at,
             reference,
             source="SYSTEM_3",
+            source_type=dispute_source,
         )
         data.sources.append(
             SourceCheck(
@@ -133,19 +164,25 @@ def normalize(
             )
         )
     for entry in data.ledger:
-        check = data.verification.ledger
-        broken = (check.result or {}).get("first_broken_seq")
-        status = check.status
-        if status == "INVALID" and entry.seq != broken:
-            status = "UNAVAILABLE"
+        reference = data.references["ledger_entries"]
+        check = verification.ledger
+        if check.status == "INVALID":
+            if check.reference == "/v1/ledger/verify":
+                broken = (check.result or {}).get("first_broken_seq")
+            else:
+                broken = (verification.bundle_result or {}).get("first_broken_seq")
+                if reference != f"{bundle_path}#ledger_entries":
+                    broken = None
+            if entry.seq != broken:
+                check = None
         add(
             "ledger_entry",
             f"ledger:{entry.seq}",
             entry,
             entry.seq,
             entry.ts,
-            data.references["ledger_entries"],
-            status,
+            reference,
+            check,
         )
 
     missing, invalid = missing_and_invalid(data, items, payment_id)

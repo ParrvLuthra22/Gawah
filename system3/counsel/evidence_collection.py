@@ -2,23 +2,27 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from cryptography.exceptions import UnsupportedAlgorithm
 from gawah_contract import (
     EvidenceBundle,
     GuardianDecision,
     LedgerEntry,
     LedgerVerifyResult,
     Mandate,
-    MerchantKey,
     PaymentRecord,
     PurchaseProposal,
     SignedCart,
 )
-from gawah_contract.carts import load_public_key, verify_cart
 from pydantic import TypeAdapter, ValidationError
 
 from .clients import IntegrationError, System2Client
-from .evidence_schemas import EvidenceIssue, SourceCheck, Verification, VerificationSummary
+from .evidence_schemas import (
+    EvidenceIssue,
+    SourceCheck,
+    SourceSystem,
+    SourceType,
+    Verification,
+    VerificationSummary,
+)
 from .models import now
 
 REFERENCE_PATTERN = r"^[A-Za-z0-9_-]{1,255}$"
@@ -31,7 +35,7 @@ LEDGER_VERIFY = "/v1/ledger/verify"
 
 @dataclass
 class CollectedEvidence:
-    source: str = "SYSTEM_2"
+    source_type: SourceType = "UNKNOWN"
     records: dict = field(default_factory=dict)
     references: dict[str, str] = field(default_factory=dict)
     retrieved_at: dict[str, datetime] = field(default_factory=dict)
@@ -39,6 +43,13 @@ class CollectedEvidence:
     invalid: list[EvidenceIssue] = field(default_factory=list)
     contradictions: list[EvidenceIssue] = field(default_factory=list)
     verification: VerificationSummary | None = None
+    bundle_available: bool = False
+    bundle_verification: dict | None = None
+    engine_verification: dict | None = None
+
+    @property
+    def source(self) -> SourceSystem:
+        return "MOCK_ENGINE" if self.source_type == "MOCK_RESPONSE" else "SYSTEM_2"
 
     @property
     def payment(self) -> PaymentRecord | None:
@@ -97,7 +108,10 @@ class CollectedEvidence:
 def _fetch(client, data, reference, adapter, *, params=None, name):
     path = reference.partition("?")[0]
     try:
-        result = adapter.validate_python(client.get_json(path, params=params))
+        payload = client.get_json(path, params=params)
+        if reference == LEDGER_VERIFY and isinstance(payload, dict):
+            data.engine_verification = payload
+        result = adapter.validate_python(payload, strict=reference == LEDGER_VERIFY)
     except IntegrationError as exc:
         status = "NOT_FOUND" if exc.upstream_status == 404 else "UNAVAILABLE"
         if exc.code == "INVALID_RESPONSE":
@@ -138,15 +152,12 @@ def _collect_bundle(client, data: CollectedEvidence, payment_id: str) -> None:
     bundle = _fetch(client, data, path, OBJECT, name="bundle")
     if bundle is None:
         return
-    # The current contract exposes this route in mock mode only.
-    data.source = "MOCK_ENGINE"
-    data.sources[-1].source_system = "MOCK_ENGINE"
     records = {}
     for name, adapter in BUNDLE_FIELDS.items():
         if bundle.get(name) is None:
             continue
         try:
-            records[name] = adapter.validate_python(bundle[name])
+            records[name] = adapter.validate_python(bundle[name], strict=name == "verification")
         except ValidationError:
             data.bad_record(name, f"{path}#{name}")
     payment = records.get("payment")
@@ -155,92 +166,136 @@ def _collect_bundle(client, data: CollectedEvidence, payment_id: str) -> None:
         data.sources[-1].status = "INVALID"
         data.sources[-1].detail = "Bundle belongs to another payment."
         return
+    if isinstance(bundle.get("verification"), dict):
+        data.bundle_verification = bundle["verification"]
+    data.bundle_available = True
     for name, value in records.items():
         data.put(name, value, f"{path}#{name}")
 
 
-def _signature(cart: SignedCart | None, merchant: MerchantKey | None, data) -> Verification:
-    reference = data.references.get("merchant_key")
-    if not cart:
-        return Verification(status="UNAVAILABLE", detail="No signed cart was collected.")
-    if data.source == "MOCK_ENGINE" and cart.signature.startswith("mock-signature-"):
-        return Verification(
-            status="UNAVAILABLE",
-            reference=reference,
-            detail="Mock cart signatures do not establish cryptographic verification.",
+def _classify_source(data: CollectedEvidence) -> SourceType:
+    signed = (data.mandate, data.cart, *data.ledger)
+    payment = data.payment
+    if (
+        any(record and record.signature.startswith("mock-signature-") for record in signed)
+        or (data.mandate and data.mandate.signing_alg == "ed25519")
+        or (
+            payment
+            and (
+                (payment.paypal_order_id or "").startswith("FAKEORDER")
+                or (payment.paypal_capture_id or "").startswith("FAKECAPTURE")
+            )
         )
-    if not merchant or merchant.key_id != cart.key_id or merchant.alg != "ES256":
-        return Verification(
-            status="UNAVAILABLE",
-            reference=reference,
-            detail="The merchant registry did not supply the cart's ES256 signing key.",
-        )
-    try:
-        key = load_public_key(merchant.public_key_pem)
-    except (ValueError, TypeError, UnsupportedAlgorithm):
-        return Verification(
-            status="UNAVAILABLE",
-            reference=reference,
-            detail="The registered key could not be read.",
-        )
-    ok = verify_cart(cart, key)
-    return Verification(
-        status="VERIFIED" if ok else "INVALID",
-        reference=reference,
-        detail="Cart signature checked with the shared verifier and the matching merchant key.",
-        result={"ok": ok, "merchant_id": merchant.merchant_id, "key_id": merchant.key_id},
-    )
+    ):
+        return "MOCK_RESPONSE"
+    if data.mandate and data.mandate.signing_alg == "ES256":
+        return "REAL_RECORD"
+    # The wire format has no explicit engine-mode field.
+    return "UNKNOWN"
 
 
 def _ledger_check(
     result: LedgerVerifyResult | None,
     reference: str,
     detail: str,
+    raw: dict | None,
 ) -> Verification:
     if result is None:
         return Verification(
-            status="UNAVAILABLE", reference=reference, detail="No check was returned."
+            status="UNAVAILABLE",
+            reference=reference,
+            detail="No usable check was returned.",
+            result=raw,
         )
     if result.checked < 0 or (result.ok and result.first_broken_seq is not None):
         return Verification(
             status="INVALID",
             reference=reference,
             detail="The verification result contains inconsistent coverage fields.",
-            result=result.model_dump(mode="json"),
+            result=raw,
         )
-    status = "INVALID" if not result.ok else "VERIFIED" if result.checked > 0 else "UNAVAILABLE"
+    status = "INVALID" if not result.ok else "VERIFIED" if result.checked > 0 else "UNVERIFIED"
     return Verification(
         status=status,
         reference=reference,
         detail=detail
         if result.checked or not result.ok
         else "The verifier did not check any entries.",
-        result=result.model_dump(mode="json"),
+        result=raw,
     )
 
 
-def _verify(client: System2Client, data: CollectedEvidence, merchant) -> VerificationSummary:
+def _verify(client: System2Client, data: CollectedEvidence, payment_id: str) -> VerificationSummary:
     bundle = data.records.get("verification")
     engine = _fetch(client, data, LEDGER_VERIFY, BUNDLE_FIELDS["verification"], name="ledger_check")
-    mock = data.source == "MOCK_ENGINE"
     global_check = _ledger_check(
         engine,
         LEDGER_VERIFY,
         "Engine-wide mock chain check (hashes and links)."
-        if mock
-        else "Engine-wide chain check reported by System 2. Engine mode is not reported.",
+        if data.source_type == "MOCK_RESPONSE"
+        else "Engine-wide chain check reported by System 2.",
+        data.engine_verification,
     )
-    reference = data.references.get("verification")
-    if reference and data.references.get("ledger_entries") == reference.replace(
-        "#verification", "#ledger_entries"
-    ):
-        scoped = _ledger_check(
-            bundle, reference, "Mock bundle reports a chain check (hashes and links)."
+    reference = f"/v1/evidence/{payment_id}#verification"
+
+    def named(name: str) -> Verification:
+        check_reference = f"{reference}.checks/{name}"
+        matches = [check for check in bundle.checks if check.name == name] if bundle else []
+        if len(matches) == 1:
+            check = matches[0]
+            return Verification(
+                status="VERIFIED" if check.ok else "INVALID",
+                reference=check_reference,
+                detail=check.detail or "System 2 reported this check.",
+                result=check.model_dump(mode="json"),
+            )
+        if matches:
+            return Verification(
+                status="UNAVAILABLE",
+                reference=check_reference,
+                detail="System 2 returned multiple results for this check.",
+            )
+        if not data.bundle_available or any(
+            issue.code == "INVALID_VERIFICATION" for issue in data.invalid
+        ):
+            return Verification(
+                status="UNAVAILABLE",
+                reference=check_reference,
+                detail="The evidence bundle verification could not be retrieved or read.",
+            )
+        return Verification(
+            status="UNVERIFIED",
+            reference=check_reference,
+            detail="The evidence bundle did not report this check.",
         )
-        if scoped.status == "VERIFIED" and bundle.checked != len(data.ledger):
+
+    scoped = named("ledger_chain")
+    entries_reference = data.references.get("ledger_entries", "")
+    if scoped.status == "VERIFIED":
+        if (
+            not data.ledger
+            or entries_reference != reference.replace("#verification", "#ledger_entries")
+            or bundle.first_broken_seq is not None
+            or max(entry.seq for entry in data.ledger) > bundle.checked
+            or any(issue.code == "INVALID_LEDGER_SEQUENCE" for issue in data.invalid)
+        ):
             scoped.status = "UNAVAILABLE"
-            scoped.detail = "The bundle's check count does not match its collected ledger entries."
-    elif data.ledger and data.references["ledger_entries"].startswith("/v1/ledger?") and engine:
+            scoped.detail = (
+                "The bundle's ledger check does not establish coverage for these entries."
+            )
+    elif (
+        scoped.status == "UNVERIFIED"
+        and bundle
+        and not bundle.ok
+        and bundle.first_broken_seq is not None
+    ):
+        scoped = Verification(
+            status="INVALID",
+            reference=reference,
+            detail="System 2 reported a broken ledger sequence.",
+            result=data.bundle_verification,
+        )
+    elif data.ledger and entries_reference.startswith("/v1/ledger?") and scoped.status != "INVALID":
         if (
             global_check.status == "VERIFIED"
             and max(entry.seq for entry in data.ledger) <= engine.checked
@@ -250,27 +305,24 @@ def _verify(client: System2Client, data: CollectedEvidence, merchant) -> Verific
                     "detail": "System 2 reported a successful chain check covering the collected sequences."
                 }
             )
-        else:
+        elif global_check.status == "INVALID" and any(
+            entry.seq == engine.first_broken_seq for entry in data.ledger
+        ):
+            scoped = global_check
+        elif global_check.status == "UNAVAILABLE":
             scoped = Verification(
                 status="UNAVAILABLE",
                 reference=LEDGER_VERIFY,
-                detail="The engine-wide check did not establish coverage for these entries.",
+                detail=global_check.detail,
                 result=global_check.result,
             )
-    else:
-        scoped = Verification(
-            status="UNAVAILABLE",
-            reference=reference or LEDGER_VERIFY,
-            detail="No verification covers the payment's collected ledger entries.",
-        )
     return VerificationSummary(
-        mandate_signature=Verification(
-            status="UNAVAILABLE",
-            detail="The contract exposes no standalone mandate-signature verification result.",
-        ),
-        cart_signature=_signature(data.cart, merchant, data),
+        mandate_signature=named("mandate_signature"),
+        cart_signature=named("cart_signature"),
         ledger=scoped,
         engine_ledger=global_check,
+        payment_reference_match=named("payment_reference_match"),
+        bundle_result=data.bundle_verification,
     )
 
 
@@ -337,18 +389,11 @@ def collect_evidence(
                 502,
             )
         raise IntegrationError("EVIDENCE_NOT_FOUND", "No evidence was found for this payment.", 404)
-    merchant = None
-    merchant_id = (
-        data.cart.merchant_id if data.cart else data.proposal.merchant_id if data.proposal else None
-    )
-    if merchant_id and re.fullmatch(REFERENCE_PATTERN, merchant_id):
-        path = f"/v1/merchants/{merchant_id}/public-key"
-        merchant = _fetch(client, data, path, TypeAdapter(MerchantKey), name="merchant_key")
-        if merchant is not None and merchant.merchant_id == merchant_id:
-            data.put("merchant_key", merchant, path)
-        else:
-            merchant = None
-    data.verification = _verify(client, data, merchant)
+    data.source_type = _classify_source(data)
+    data.verification = _verify(client, data, payment_id)
+    if data.source_type == "MOCK_RESPONSE":
+        for source in data.sources:
+            source.source_system = "MOCK_ENGINE"
     data.sources.append(
         SourceCheck(
             source_system="SYSTEM_1",

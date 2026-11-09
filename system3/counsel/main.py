@@ -8,12 +8,15 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from gawah_contract import ErrorResponse
+from pydantic import Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .clients import IntegrationError, PayPalClient, System2Client
 from .config import Settings
+from .counsel_schemas import CounselAnalysisResponse
+from .counsel_service import analyze, get_analysis, get_history
 from .evidence import PaymentReference, assemble_pack, get_pack
 from .evidence_schemas import (
     EvidenceIssues,
@@ -21,6 +24,7 @@ from .evidence_schemas import (
     TimelineEvent,
     VerificationSummary,
 )
+from .groq_counsel import GROQ_BASE_URL, GroqCounsel
 from .models import Dispute, DisputeStatusHistory, DisputeSyncLog, Source
 from .schemas import (
     DisputeDetail,
@@ -229,7 +233,49 @@ def evidence_issues(
     )
 
 
-def create_app(settings: Settings | None = None, *, paypal_transport=None, system2_transport=None):
+@router.post("/counsel/{payment_id}/analyze", response_model=CounselAnalysisResponse)
+def analyze_case(
+    request: Request,
+    db: DB,
+    payment_id: PaymentReference,
+    dispute_id: DisputeReference = None,
+    force: bool = False,
+):
+    result = analyze(
+        db, request.app.state.groq_counsel, payment_id, dispute_id=dispute_id, force=force
+    )
+    if result.error:
+        return error_response(
+            request,
+            IntegrationError(result.error.code, result.error.message, result.error.status),
+            {"analysis_id": result.id},
+        )
+    return result
+
+
+@router.get("/counsel/{payment_id}", response_model=CounselAnalysisResponse)
+def latest_counsel(db: DB, payment_id: PaymentReference, dispute_id: DisputeReference = None):
+    return get_analysis(db, payment_id, dispute_id)
+
+
+class CounselHistoryParams(PageParams):
+    dispute_id: int | None = Field(default=None, ge=1, le=2_147_483_647)
+
+
+@router.get("/counsel/{payment_id}/history", response_model=Page[CounselAnalysisResponse])
+def counsel_history(
+    db: DB, payment_id: PaymentReference, params: Annotated[CounselHistoryParams, Query()]
+):
+    return get_history(db, payment_id, params.dispute_id, params.page, params.page_size)
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    paypal_transport=None,
+    system2_transport=None,
+    groq_transport=None,
+):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         config = settings if settings is not None else Settings()
@@ -244,9 +290,13 @@ def create_app(settings: Settings | None = None, *, paypal_transport=None, syste
                 httpx.Client(
                     base_url=str(config.system2_base_url), transport=system2_transport, timeout=10.0
                 ) as system2_http,
+                httpx.Client(
+                    base_url=GROQ_BASE_URL, transport=groq_transport, timeout=25.0
+                ) as groq_http,
             ):
                 app.state.paypal = PayPalClient(config, paypal_http)
                 app.state.system2 = System2Client(config, system2_http)
+                app.state.groq_counsel = GroqCounsel(config, groq_http)
                 yield
         finally:
             engine.dispose()

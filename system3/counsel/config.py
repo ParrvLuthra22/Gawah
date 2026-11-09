@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, SecretStr, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     system2_base_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:8000")
     system2_key: SecretStr = SecretStr("")
     system3_key: SecretStr = SecretStr("")
+    groq_api_key: SecretStr = SecretStr("")
+    groq_model: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ] = "openai/gpt-oss-20b"
 
     @property
     def database_dsn(self):

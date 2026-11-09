@@ -50,6 +50,7 @@ def timeline(items: list[EvidenceItem]) -> list[TimelineEvent]:
                 type=kind,
                 timestamp=item.timestamp,
                 source_system=item.source_system,
+                source_type=item.source_type,
                 record_id=record_id,
                 evidence_id=item.id,
                 description=description,
@@ -122,6 +123,16 @@ def missing_and_invalid(data: CollectedEvidence, items: dict[str, EvidenceItem],
                 references=["docs/CONTRACT.md"],
             )
         )
+        if data.payment and data.payment.status in {"PAID", "REFUNDED"}:
+            missing.append(
+                issue(
+                    "FULFILLMENT_UNAVAILABLE",
+                    "MISSING",
+                    f"The payment is recorded as {data.payment.status}. No fulfillment record was collected.",
+                    items.get("payment"),
+                    references=["docs/CONTRACT.md"],
+                )
+            )
         if data.mandate and data.mandate.category.casefold() == "footwear":
             missing.append(
                 issue(
@@ -136,16 +147,35 @@ def missing_and_invalid(data: CollectedEvidence, items: dict[str, EvidenceItem],
     for name, check, affected in (
         ("MANDATE_SIGNATURE", data.verification.mandate_signature, items.get("mandate")),
         ("CART_SIGNATURE", data.verification.cart_signature, items.get("signed_cart")),
+        (
+            "PAYMENT_REFERENCE_MATCH",
+            data.verification.payment_reference_match,
+            items.get("payment"),
+        ),
         ("LEDGER_VERIFICATION", data.verification.ledger, None),
         ("ENGINE_LEDGER_VERIFICATION", data.verification.engine_ledger, None),
     ):
-        if name in {"MANDATE_SIGNATURE", "CART_SIGNATURE"} and affected is None:
+        if check is None or (
+            name in {"MANDATE_SIGNATURE", "CART_SIGNATURE", "PAYMENT_REFERENCE_MATCH"}
+            and affected is None
+            and check.status != "INVALID"
+        ):
             continue
         references = [check.reference] if check.reference else []
         if check.status == "INVALID":
             reason = (check.result or {}).get("reason")
-            if name == "LEDGER_VERIFICATION" and check.result:
-                affected = items.get(f"ledger:{check.result.get('first_broken_seq')}")
+            if affected and affected.verification is None:
+                affected = None
+            if name == "LEDGER_VERIFICATION":
+                result = (
+                    check.result
+                    if check.reference == "/v1/ledger/verify"
+                    else data.verification.bundle_result
+                )
+                broken = (result or {}).get("first_broken_seq")
+                entry = items.get(f"ledger:{broken}")
+                if entry and entry.verification_status == "INVALID":
+                    affected = entry
             invalid.append(
                 issue(
                     f"INVALID_{name}",
@@ -156,7 +186,7 @@ def missing_and_invalid(data: CollectedEvidence, items: dict[str, EvidenceItem],
                     severity="HIGH",
                 )
             )
-        elif check.status in {"UNAVAILABLE", "PENDING"}:
+        elif check.status in {"UNAVAILABLE", "UNVERIFIED", "PENDING"}:
             missing.append(
                 issue(
                     f"MISSING_{name}",

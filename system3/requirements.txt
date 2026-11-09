@@ -3,6 +3,10 @@ uvicorn>=0.30,<1
 pydantic>=2,<3
 pydantic-settings>=2,<3
 httpx>=0.27,<1
-SQLAlchemy>=2,<3
+SQLAlchemy>=2.0,<2.1
 alembic>=1.13,<2
 psycopg[binary]>=3.2,<4
+langgraph>=1.2,<1.3
+# Compatible native wheels for the local Windows Python 3.14 runtime.
+xxhash==3.6.0; sys_platform == "win32" and python_version == "3.14"
+ormsgpack==1.12.0; sys_platform == "win32" and python_version == "3.14"

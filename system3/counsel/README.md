@@ -41,7 +41,7 @@ Send `X-Gawah-Key` with the configured `SYSTEM3_KEY` on every route except healt
 | GET | `/api/disputes/sync/history` | List attempts, newest first, with `page` and `page_size` |
 | GET | `/api/paypal/status` | Probe Sandbox dispute list access and report the latest sync and stored PayPal count |
 
-Sync traverses the pages returned by PayPal and fetches details for each unique case. It uses exact capture, order, or custom IDs from System 2's `GET /v1/payments`. The next sync retries unresolved links. If PayPal retrieval fails, the run rolls back its dispute changes and records the error. If System 2 is unavailable, PayPal data is saved with a partial result. The current System 2 real-mode payment list returns HTTP 501. PayPal controls which cases its list returns and which detail fields it exposes. The local console is intended for a trusted operator and binds to loopback by default.
+Sync traverses the pages returned by PayPal and fetches details for each unique case. It uses exact capture, order, or custom IDs from System 2's `GET /v1/payments`. The next sync retries unresolved links. If PayPal retrieval fails, the run rolls back its dispute changes and records the error. If System 2 is unavailable, PayPal data is saved with a partial result. PayPal controls which cases its list returns and which detail fields it exposes. The local console is intended for a trusted operator and binds to loopback by default.
 
 ## N2 evidence assembly
 
@@ -57,4 +57,22 @@ Run `python -m alembic upgrade head` to add the evidence pack table. Open **Evid
 
 Use the same `X-Gawah-Key` as for N1. Pass the local N1 `dispute_id` query parameter to select a specific dispute for a payment. Assembly requires that selection when multiple disputes match. GET requests accept an optional `version` to retrieve a saved snapshot. Reassembling identical evidence for the same dispute returns its existing version.
 
-Mock bundle verification reports hash and link checks. The engine-wide result is stored separately. Cart verification uses the shared verifier when the merchant registry provides the exact ES256 signing key. The shared contract exposes no independent mandate-signature result or merchant order and delivery read API. Real-mode evidence and payment endpoints return HTTP 501. If a local dispute or payment-scoped ledger entry is available, N2 can still save a partial pack with the gaps recorded.
+N2 reads the named ledger, mandate signature, cart signature, and payment reference checks from System 2's evidence bundle. The original bundle verification and independent engine-wide ledger result are stored separately. Source provenance is recorded independently of verification. Mock bundles without named checks remain unverified at the payment level. The current contract has no merchant order, fulfillment, or delivery read API.
+
+Reassemble an older pack to capture individual verification results and the new source classification. Earlier versions remain available as saved snapshots. If System 2 is unavailable and a local dispute is available, N2 can save a partial pack with the gaps recorded.
+
+## N3 AI Counsel
+
+Install the updated backend requirements, run `python -m alembic upgrade head`, and set `GROQ_API_KEY` in `system3/.env`. `GROQ_MODEL` defaults to `openai/gpt-oss-20b` and accepts a Groq model that supports strict structured output. Open **AI Counsel** from a saved evidence pack or enter its payment ID on the Counsel page.
+
+Counsel reads the latest saved N2 pack for the case. It checks provenance, verification, and the dispute reason before sending a limited set of facts to Groq. Groq selects a recommendation and the facts to cite. Counsel validates those selections and renders a draft for human review. The Evidence links point to the exact pack version analyzed. Draft edits stay in the dashboard view.
+
+| Method | Route |
+| --- | --- |
+| POST | `/api/counsel/{payment_id}/analyze` |
+| GET | `/api/counsel/{payment_id}` |
+| GET | `/api/counsel/{payment_id}/history` |
+
+Use the System 3 `X-Gawah-Key`. Use `dispute_id` to select a local N1 dispute. Analysis reuses a saved result for the same evidence version unless `force=true` is sent. Failed attempts are recorded and can be retried. History accepts `page` and `page_size`.
+
+Decisive recommendations are currently supported for incorrect-amount cases with a verified signed price and a matching verified completion entry. Other complaints surface category-specific evidence requests where the current contract cannot establish a decisive fact. System 2 supplies no fulfillment records.
