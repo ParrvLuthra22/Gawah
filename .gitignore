@@ -26,3 +26,6 @@ keys/
 .DS_Store
 .idea/
 .vscode/
+
+# Spike output (screenshots, logs)
+spikes/out/

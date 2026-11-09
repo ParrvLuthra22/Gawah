@@ -16,6 +16,7 @@ dependencies = [
     "pytest",
     "ruff",
     "gawah-contract",
+    "mcp>=2.3.0",
 ]
 
 [build-system]
@@ -38,3 +39,8 @@ members = ["contract"]
 
 [tool.uv.sources]
 gawah-contract = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "playwright>=1.64.1",
+]
