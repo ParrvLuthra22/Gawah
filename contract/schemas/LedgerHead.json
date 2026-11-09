@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "description": "Signed head of the ledger: an external anchor the UI can display (additive).",
+  "properties": {
+    "hash": {
+      "description": "Hash of the latest entry; 64 zeros for an empty ledger",
+      "title": "Hash",
+      "type": "string"
+    },
+    "key_id": {
+      "title": "Key Id",
+      "type": "string"
+    },
+    "message": {
+      "description": "Exact text signed: gawah-ledger-head:{seq}:{hash}",
+      "title": "Message",
+      "type": "string"
+    },
+    "seq": {
+      "description": "Sequence number of the latest entry; 0 for an empty ledger",
+      "title": "Seq",
+      "type": "integer"
+    },
+    "signature": {
+      "description": "ES256 (base64url r||s) over `message` by the ledger key",
+      "title": "Signature",
+      "type": "string"
+    }
+  },
+  "required": [
+    "seq",
+    "hash",
+    "message",
+    "signature",
+    "key_id"
+  ],
+  "title": "LedgerHead",
+  "type": "object"
+}

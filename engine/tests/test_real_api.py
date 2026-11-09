@@ -4,7 +4,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import KEY_S1, KEY_S3, AutoKeyClient
 from gawah_contract import ErrorResponse, LedgerEntry, LedgerVerifyResult, Mandate
 from gawah_engine.config import settings
 from gawah_engine.main import app
@@ -15,12 +15,12 @@ H = {"X-Gawah-Key": "real-key"}
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", False)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
-    monkeypatch.setattr(settings, "system3_key", "")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'api.db'}")
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
-    with TestClient(app) as client:  # runs the lifespan: init db + keys
+    with AutoKeyClient(app) as client:  # runs the lifespan: init db + keys
         client.db_path = tmp_path / "api.db"
         yield client
 
@@ -70,14 +70,15 @@ def test_verify_endpoint_ok_then_broken(api):
     api.post("/v1/mandates", json=body(), headers=H)
     r = api.get("/v1/ledger/verify", headers=H)
     assert LedgerVerifyResult.model_validate(r.json()) == LedgerVerifyResult(
-        ok=True, checked=2, first_broken_seq=None
+        ok=True, checked=2, first_broken_seq=None, reason=None
     )
     conn = sqlite3.connect(api.db_path, isolation_level=None)
     conn.execute("DROP TRIGGER ledger_no_update")
     conn.execute("""UPDATE ledger SET data = '{"mandate_id":"x"}' WHERE seq = 2""")
     conn.close()
-    assert api.get("/v1/ledger/verify", headers=H).json() == {
-        "ok": False, "checked": 2, "first_broken_seq": 2}
+    broken = api.get("/v1/ledger/verify", headers=H).json()
+    assert broken["ok"] is False and broken["checked"] == 2 and broken["first_broken_seq"] == 2
+    assert "hash mismatch" in broken["reason"]
 
 
 def test_errors_use_the_contract_envelope(api):
@@ -102,16 +103,49 @@ def test_revoking_an_expired_mandate_is_409(api):
     assert api.post(f"/v1/mandates/{m['id']}/revoke", headers=H).status_code == 409
 
 
-def test_unbuilt_endpoints_still_answer_501(api):
-    for path in ("/v1/payments", "/v1/evidence/pay_01", "/v1/merchants/demo-shoe-store/public-key"):
-        assert api.get(path, headers=H).status_code == 501
-
+def test_no_endpoint_answers_501_in_real_mode(api):
+    assert api.get("/v1/payments", headers=H).json() == []
+    assert api.get("/v1/payments/pay_x", headers=H).status_code == 404
+    assert api.post("/v1/payments/pay_x/refund", headers=H).status_code == 404
+    assert api.get("/v1/evidence/pay_x", headers=H).status_code == 404
+    assert api.get("/v1/merchants/nobody/public-key", headers=H).status_code == 404
 
 def test_mock_mode_never_touches_the_database(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'never.db'}")
-    with TestClient(app) as client:
+    with AutoKeyClient(app) as client:
         assert client.get("/v1/mandates/man_01", headers=H).json()["id"] == "man_01"
         assert client.get("/v1/ledger/verify", headers=H).json()["checked"] == 5
     assert not (tmp_path / "never.db").exists()
+
+
+def test_mock_verify_reports_reason_for_a_broken_chain(monkeypatch):
+    from gawah_contract.fixtures import load
+    from gawah_engine.routers import ledger as ledger_router
+
+    chain = load("ledger_chain")
+    chain[2]["data"]["verdict"] = "BLOCK"  # edit after hashing
+    monkeypatch.setattr(settings, "gawah_mock", True)
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
+    monkeypatch.setattr(ledger_router, "load", lambda name: chain)
+    r = AutoKeyClient(app).get("/v1/ledger/verify", headers=H).json()
+    assert r["ok"] is False and r["first_broken_seq"] == 3 and "seq 3" in r["reason"]
+
+
+def test_budget_endpoint_tracks_reservations(api):
+    from gawah_engine.services import get_services
+
+    m = api.post("/v1/mandates", json=body(), headers=H).json()
+    assert api.get(f"/v1/mandates/{m['id']}/budget", headers=H).json() == {
+        "mandate_id": m["id"], "max_amount_minor": 8000, "spent_minor": 0,
+        "reserved_minor": 0, "remaining_minor": 8000, "currency": "USD"}
+    mandates = get_services().mandates
+    mandates.reserve(m["id"], 3000, "k1")
+    mandates.reserve(m["id"], 1000, "k2")
+    mandates.commit(m["id"], "k2")
+    b = api.get(f"/v1/mandates/{m['id']}/budget", headers=H).json()
+    assert (b["spent_minor"], b["reserved_minor"], b["remaining_minor"]) == (1000, 3000, 4000)
+    assert api.get("/v1/mandates/man_nope/budget", headers=H).status_code == 404

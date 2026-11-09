@@ -2,11 +2,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter
-from gawah_contract import Mandate, MandateCreate, MandateStatus
+from gawah_contract import BudgetStatus, Mandate, MandateCreate, MandateStatus
 from gawah_contract.fixtures import load
 
 from ..config import settings
 from ..errors import GawahError
+from ..harden import check_mandate_create
 from ..services import get_services
 
 router = APIRouter(prefix="/v1/mandates", tags=["mandates"])
@@ -27,6 +28,7 @@ def _get(mandate_id: str) -> Mandate:
 
 @router.post("", response_model=Mandate, status_code=201)
 def create_mandate(body: MandateCreate) -> Mandate:
+    check_mandate_create(body)
     if not settings.gawah_mock:
         return get_services().mandates.create(body)
     base = _fixture()
@@ -61,3 +63,21 @@ def revoke_mandate(mandate_id: str) -> Mandate:
     if not settings.gawah_mock:
         return get_services().mandates.revoke(mandate_id)
     return _get(mandate_id).model_copy(update={"status": MandateStatus.REVOKED})
+
+
+@router.get("/{mandate_id}/budget", response_model=BudgetStatus)
+def get_budget(mandate_id: str) -> BudgetStatus:
+    if not settings.gawah_mock:
+        svc = get_services().mandates
+        mandate = svc.get(mandate_id)  # 404 if unknown; also applies auto-expiry
+        b = svc.budget(mandate_id)
+        return BudgetStatus(
+            mandate_id=mandate_id,
+            max_amount_minor=b.max_minor,
+            spent_minor=b.spent_minor,
+            reserved_minor=b.reserved_minor,
+            remaining_minor=b.remaining_minor,
+            currency=mandate.currency,
+        )
+    _get(mandate_id)
+    return BudgetStatus.model_validate(load("budget_status"))

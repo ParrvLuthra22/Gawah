@@ -1,5 +1,6 @@
 import pytest
 from gawah_contract import (
+    BudgetStatus,
     DisputeCase,
     EvidenceBundle,
     GuardianDecision,
@@ -28,6 +29,7 @@ MODELS = {
     "evidence_bundle_wrong_size": EvidenceBundle,
     "dispute_defendable": DisputeCase,
     "dispute_wrong_size": DisputeCase,
+    "budget_status": BudgetStatus,
 }
 
 

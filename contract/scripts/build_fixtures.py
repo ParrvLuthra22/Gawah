@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from gawah_contract import (
+    BudgetStatus,
     DisputeCase,
     EvidenceBundle,
     GuardianDecision,
@@ -200,3 +201,10 @@ write("evidence_bundle_wrong_size", bundle(mandate, prop_sz, dec_sz, pay_sz, led
       EvidenceBundle)
 write("dispute_defendable", dispute_ok, DisputeCase)
 write("dispute_wrong_size", dispute_sz, DisputeCase)
+
+# man_01 after pay_01 ($65.00 of $80.00) has been paid
+budget = {
+    "mandate_id": "man_01", "max_amount_minor": 8000, "spent_minor": 6500,
+    "reserved_minor": 0, "remaining_minor": 1500, "currency": "USD",
+}
+write("budget_status", budget, BudgetStatus)

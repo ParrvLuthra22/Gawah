@@ -14,6 +14,7 @@ import base64
 import os
 import re
 import threading
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -75,7 +76,16 @@ class ES256Signer:
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self._lock:
             if not self._active_pointer().exists():
-                self._create_key(1)
+                try:
+                    self._create_key(1)
+                except FileExistsError:
+                    # another engine process is creating the first key right now: wait for it
+                    for _ in range(100):
+                        if self._active_pointer().exists() and self._active_pointer().read_text().strip():
+                            break
+                        time.sleep(0.05)
+                    else:
+                        raise
 
     # -- key files ---------------------------------------------------------------------
     def _active_pointer(self) -> Path:
@@ -96,7 +106,9 @@ class ES256Signer:
         fd = os.open(self._key_path(key_id), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(pem)
-        self._active_pointer().write_text(key_id)
+        tmp = self._active_pointer().with_suffix(".tmp")
+        tmp.write_text(key_id)
+        os.replace(tmp, self._active_pointer())  # atomic: readers never see a half-written pointer
         self._cache[key_id] = key
         return key_id
 

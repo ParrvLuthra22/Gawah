@@ -196,18 +196,22 @@ def pay_order(
     buyer_email: str = "",
     buyer_password: str = "",
     approver: Callable[[str, str, str], None] | None = None,
+    on_order: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Create and pay an order with no human click. Returns the captured order.
 
     Route 1: card payment_source, confirmed in the create call (needs card processing enabled).
     Route 2: PayPal approval driven by a headless browser logged in as the sandbox buyer.
-    Callers pass the same inputs either way and get the same shape back.
+    Callers pass the same inputs either way and get the same shape back. `on_order` is called
+    with the order as soon as it exists (before capture) so the caller can record its id.
     """
     if card:
         try:
             order = client.create_order(
                 amount_minor, currency, custom_id, description, idempotency_key, {"card": card}
             )
+            if on_order:
+                on_order(order)
             if order.get("status") != "COMPLETED":
                 order = client.capture_order(order["id"], f"{idempotency_key}-cap")
             return order
@@ -237,5 +241,7 @@ def pay_order(
     link = approve_link(order)
     if not link:
         raise PayPalError(0, order, None, "order has no approval link")
+    if on_order:
+        on_order(order)
     approver(link, buyer_email, buyer_password)
     return client.capture_order(order["id"], f"{idempotency_key}-cap")

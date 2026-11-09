@@ -48,6 +48,17 @@ class MandateCreate(_Model):
     expires_at: datetime
 
 
+class BudgetStatus(_Model):
+    """Body of GET /v1/mandates/{id}/budget. remaining = max - spent - reserved."""
+
+    mandate_id: str
+    max_amount_minor: int = Field(ge=0)
+    spent_minor: int = Field(ge=0)
+    reserved_minor: int = Field(ge=0)
+    remaining_minor: int = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3)
+
+
 class Product(_Model):
     id: str
     title: str
@@ -153,10 +164,35 @@ class ProposalResult(_Model):
     payment: PaymentRecord | None
 
 
+class VerificationCheck(_Model):
+    """One named check inside a verification result (additive; see docs/CONTRACT.md)."""
+
+    name: str = Field(
+        description="ledger_chain | mandate_signature | cart_signature | payment_reference_match"
+    )
+    ok: bool
+    detail: str = Field(default="", description="Human-readable outcome of this check")
+
+
 class LedgerVerifyResult(_Model):
     ok: bool
     checked: int
     first_broken_seq: int | None = None
+    reason: str | None = Field(default=None, description="Why verification failed; null when ok")
+    checks: list[VerificationCheck] = Field(
+        default_factory=list,
+        description="Per-check breakdown (evidence bundles); empty for a plain ledger verify",
+    )
+
+
+class LedgerHead(_Model):
+    """Signed head of the ledger: an external anchor the UI can display (additive)."""
+
+    seq: int = Field(description="Sequence number of the latest entry; 0 for an empty ledger")
+    hash: str = Field(description="Hash of the latest entry; 64 zeros for an empty ledger")
+    message: str = Field(description="Exact text signed: gawah-ledger-head:{seq}:{hash}")
+    signature: str = Field(description="ES256 (base64url r||s) over `message` by the ledger key")
+    key_id: str
 
 
 class EvidenceBundle(_Model):

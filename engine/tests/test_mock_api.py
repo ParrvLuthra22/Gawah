@@ -20,7 +20,8 @@ client = TestClient(app)
 
 
 def test_health_needs_no_key():
-    assert client.get("/health").json() == {"status": "ok", "service": "gawah"}
+    assert client.get("/health").json() == {
+        "status": "ok", "service": "gawah", "semantic": "fallback", "model": None}
 
 
 def test_missing_or_bad_key_is_401_with_error_envelope():
@@ -63,7 +64,7 @@ def test_bad_merchant_is_blocked():
 
 
 def test_guardian_check_returns_decision_only():
-    r = client.post("/v1/guardian/check", json=load("proposal_shoes"), headers=H1)
+    r = client.post("/v1/guardian/check", json=load("proposal_shoes"), headers=H3)
     assert r.json()["verdict"] == "ALLOW"
 
 
@@ -95,7 +96,7 @@ def test_ledger_filters_and_verify():
     assert len(client.get("/v1/ledger?mandate_id=nope", headers=H3).json()) == 0
     assert len(client.get("/v1/ledger?subject_id=pay_01", headers=H3).json()) == 2
     assert client.get("/v1/ledger/verify", headers=H3).json() == {
-        "ok": True, "checked": 5, "first_broken_seq": None}
+        "ok": True, "checked": 5, "first_broken_seq": None, "reason": None, "checks": []}
 
 
 def test_evidence_bundles():
@@ -113,8 +114,20 @@ def test_merchants():
     assert client.get("/v1/merchants/m2/public-key", headers=H1).json()["key_id"] == "k2"
 
 
-def test_non_mock_mode_returns_501(monkeypatch):
-    # Mandates and the ledger are real in GAWAH_MOCK=0; payments are still unbuilt.
+def test_non_mock_mode_uses_real_logic_not_501(monkeypatch, tmp_path):
+    # Every endpoint has real logic now; real mode must never answer 501.
     monkeypatch.setattr(settings, "gawah_mock", False)
-    r = client.get("/v1/payments", headers=H1)
-    assert r.status_code == 501
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'm.db'}")
+    monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
+    monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
+    for path in ("/v1/mandates", "/v1/payments", "/v1/ledger"):
+        assert client.get(path, headers=H3).status_code == 200
+    assert client.get("/v1/payments/pay_01", headers=H3).status_code == 404
+
+
+def test_mock_budget():
+    r = client.get("/v1/mandates/man_01/budget", headers=H3)
+    assert r.status_code == 200
+    assert r.json() == {"mandate_id": "man_01", "max_amount_minor": 8000, "spent_minor": 6500,
+                        "reserved_minor": 0, "remaining_minor": 1500, "currency": "USD"}
+    assert client.get("/v1/mandates/nope/budget", headers=H3).status_code == 404

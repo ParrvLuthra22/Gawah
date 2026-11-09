@@ -321,11 +321,15 @@ name = "gawah-contract"
 version = "0.1.0"
 source = { editable = "contract" }
 dependencies = [
+    { name = "cryptography" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "cryptography" },
+    { name = "pydantic", specifier = ">=2" },
+]
 
 [[package]]
 name = "gawah-shopper"

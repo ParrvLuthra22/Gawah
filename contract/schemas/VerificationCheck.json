@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "description": "One named check inside a verification result (additive; see docs/CONTRACT.md).",
+  "properties": {
+    "detail": {
+      "default": "",
+      "description": "Human-readable outcome of this check",
+      "title": "Detail",
+      "type": "string"
+    },
+    "name": {
+      "description": "ledger_chain | mandate_signature | cart_signature | payment_reference_match",
+      "title": "Name",
+      "type": "string"
+    },
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "ok"
+  ],
+  "title": "VerificationCheck",
+  "type": "object"
+}
