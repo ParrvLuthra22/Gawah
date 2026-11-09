@@ -350,20 +350,26 @@ class GuardianService:
     def _duplicate_of(
         self, conn: sqlite3.Connection, p: PurchaseProposal, now: datetime
     ) -> str | None:
-        """An earlier proposal for the same mandate, merchant and cart within 60 s that was
-        allowed or is still being decided."""
+        """A cart must be paid once. DUPLICATE if the same merchant + cart id was already
+        - proposed for THIS mandate within 60 s and allowed (or still being decided), or
+        - allowed under ANOTHER mandate at any time and not since failed (cart reuse across
+          mandates), or still being decided there."""
         row = conn.execute(
             "SELECT p.id FROM proposals p LEFT JOIN decisions d ON d.proposal_id = p.id"
-            " WHERE p.id != ? AND p.mandate_id = ? AND p.merchant_id = ? AND p.cart_id = ?"
-            " AND p.received_at >= ?"
-            " AND (d.id IS NULL OR json_extract(d.body, '$.verdict') = 'ALLOW')"
-            " ORDER BY p.received_at, p.rowid LIMIT 1",
+            " WHERE p.id != ? AND p.merchant_id = ? AND p.cart_id = ? AND ("
+            "   (p.mandate_id = ? AND p.received_at >= ?"
+            "    AND (d.id IS NULL OR json_extract(d.body, '$.verdict') = 'ALLOW'))"
+            "   OR (p.mandate_id != ? AND (d.id IS NULL OR (json_extract(d.body, '$.verdict') = 'ALLOW'"
+            "    AND NOT EXISTS (SELECT 1 FROM payments y WHERE y.proposal_id = p.id"
+            "                    AND y.status = 'FAILED'))))"
+            " ) ORDER BY p.received_at, p.rowid LIMIT 1",
             (
                 p.id,
-                p.mandate_id,
                 p.merchant_id,
                 p.signed_cart.cart_id,
+                p.mandate_id,
                 format_ts(now - timedelta(seconds=DUPLICATE_WINDOW_S)),
+                p.mandate_id,
             ),
         ).fetchone()
         return row["id"] if row else None

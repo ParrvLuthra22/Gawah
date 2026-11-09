@@ -4,7 +4,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import KEY_S1, KEY_S3, AutoKeyClient
 from gawah_contract import ErrorResponse, LedgerEntry, LedgerVerifyResult, Mandate
 from gawah_engine.config import settings
 from gawah_engine.main import app
@@ -15,12 +15,12 @@ H = {"X-Gawah-Key": "real-key"}
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", False)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
-    monkeypatch.setattr(settings, "system3_key", "")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'api.db'}")
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
-    with TestClient(app) as client:  # runs the lifespan: init db + keys
+    with AutoKeyClient(app) as client:  # runs the lifespan: init db + keys
         client.db_path = tmp_path / "api.db"
         yield client
 
@@ -112,9 +112,10 @@ def test_no_endpoint_answers_501_in_real_mode(api):
 
 def test_mock_mode_never_touches_the_database(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'never.db'}")
-    with TestClient(app) as client:
+    with AutoKeyClient(app) as client:
         assert client.get("/v1/mandates/man_01", headers=H).json()["id"] == "man_01"
         assert client.get("/v1/ledger/verify", headers=H).json()["checked"] == 5
     assert not (tmp_path / "never.db").exists()
@@ -127,9 +128,10 @@ def test_mock_verify_reports_reason_for_a_broken_chain(monkeypatch):
     chain = load("ledger_chain")
     chain[2]["data"]["verdict"] = "BLOCK"  # edit after hashing
     monkeypatch.setattr(settings, "gawah_mock", True)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(ledger_router, "load", lambda name: chain)
-    r = TestClient(app).get("/v1/ledger/verify", headers=H).json()
+    r = AutoKeyClient(app).get("/v1/ledger/verify", headers=H).json()
     assert r["ok"] is False and r["first_broken_seq"] == 3 and "seq 3" in r["reason"]
 
 

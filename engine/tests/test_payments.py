@@ -549,3 +549,49 @@ def test_describe_error_never_includes_raw_bodies():
 )
 def test_classify_order(order, outcome):
     assert classify_order(order)[0] == outcome
+
+
+# --- evidence: named checks -----------------------------------------------------------------
+
+
+def _checks(bundle):
+    return {c.name: c for c in bundle.verification.checks}
+
+
+def test_evidence_lists_the_four_named_checks_all_ok_when_clean(pw):
+    pay = _paid(pw)
+    v = pw.svc.evidence.bundle(pay.id).verification
+    assert [c.name for c in v.checks] == [
+        "ledger_chain", "mandate_signature", "cart_signature", "payment_reference_match"]
+    assert v.ok and all(c.ok and c.detail for c in v.checks)
+    assert "matches ledger seq" in _checks(pw.svc.evidence.bundle(pay.id))["payment_reference_match"].detail
+
+
+def test_each_check_fails_independently(pw):
+    pay = _paid(pw)
+    conn = sqlite3.connect(pw.svc.path, isolation_level=None)
+    conn.execute("UPDATE mandates SET max_amount_minor = 900000")
+    c = _checks(pw.svc.evidence.bundle(pay.id))
+    assert [n for n, x in c.items() if not x.ok] == ["mandate_signature"]
+    conn.execute("UPDATE mandates SET max_amount_minor = 8000")  # restore the signed terms
+    conn.execute("UPDATE payments SET custom_id = 'gawah:someone-else:1'")
+    bundle = pw.svc.evidence.bundle(pay.id)
+    assert [n for n, x in _checks(bundle).items() if not x.ok] == ["payment_reference_match"]
+    assert not bundle.verification.ok and "does not match ledger reference" in bundle.verification.reason
+    conn.execute("UPDATE payments SET custom_id = ?", (pay.custom_id,))
+    conn.execute("DELETE FROM merchants")
+    assert [n for n, x in _checks(pw.svc.evidence.bundle(pay.id)).items() if not x.ok] == ["cart_signature"]
+    conn.close()
+
+
+def test_ledger_chain_check_fails_when_an_entry_is_edited(pw):
+    pay = _paid(pw)
+    seq = pw.entries(type=T.DECISION_MADE)[0].seq
+    conn = sqlite3.connect(pw.svc.path, isolation_level=None)
+    conn.execute("DROP TRIGGER ledger_no_update")
+    conn.execute("UPDATE ledger SET data = '{\"mandate_id\":\"x\"}' WHERE seq = ?", (seq,))
+    conn.close()
+    v = pw.svc.evidence.bundle(pay.id).verification
+    c = {x.name: x for x in v.checks}
+    assert not c["ledger_chain"].ok and v.first_broken_seq == seq
+    assert c["mandate_signature"].ok and c["cart_signature"].ok

@@ -7,6 +7,7 @@ from gawah_contract.fixtures import load
 
 from ..config import settings
 from ..errors import GawahError
+from ..harden import check_mandate_create
 from ..services import get_services
 
 router = APIRouter(prefix="/v1/mandates", tags=["mandates"])
@@ -27,6 +28,7 @@ def _get(mandate_id: str) -> Mandate:
 
 @router.post("", response_model=Mandate, status_code=201)
 def create_mandate(body: MandateCreate) -> Mandate:
+    check_mandate_create(body)
     if not settings.gawah_mock:
         return get_services().mandates.create(body)
     base = _fixture()

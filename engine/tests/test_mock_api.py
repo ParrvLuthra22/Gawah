@@ -20,7 +20,8 @@ client = TestClient(app)
 
 
 def test_health_needs_no_key():
-    assert client.get("/health").json() == {"status": "ok", "service": "gawah"}
+    assert client.get("/health").json() == {
+        "status": "ok", "service": "gawah", "semantic": "fallback", "model": None}
 
 
 def test_missing_or_bad_key_is_401_with_error_envelope():
@@ -95,7 +96,7 @@ def test_ledger_filters_and_verify():
     assert len(client.get("/v1/ledger?mandate_id=nope", headers=H3).json()) == 0
     assert len(client.get("/v1/ledger?subject_id=pay_01", headers=H3).json()) == 2
     assert client.get("/v1/ledger/verify", headers=H3).json() == {
-        "ok": True, "checked": 5, "first_broken_seq": None, "reason": None}
+        "ok": True, "checked": 5, "first_broken_seq": None, "reason": None, "checks": []}
 
 
 def test_evidence_bundles():
@@ -120,8 +121,8 @@ def test_non_mock_mode_uses_real_logic_not_501(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
     for path in ("/v1/mandates", "/v1/payments", "/v1/ledger"):
-        assert client.get(path, headers=H1).status_code == 200
-    assert client.get("/v1/payments/pay_01", headers=H1).status_code == 404
+        assert client.get(path, headers=H3).status_code == 200
+    assert client.get("/v1/payments/pay_01", headers=H3).status_code == 404
 
 
 def test_mock_budget():

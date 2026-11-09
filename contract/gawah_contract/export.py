@@ -20,6 +20,8 @@ EXPORTED = [
     "DisputeCase",
     "ErrorResponse",
     "ProposalResult",
+    "VerificationCheck",
+    "LedgerHead",
     "LedgerVerifyResult",
     "EvidenceBundle",
     "MerchantKey",

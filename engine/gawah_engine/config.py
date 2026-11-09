@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     buyer_email: str = ""
     buyer_password: str = ""
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-20b"
+    # Ordered, comma-separated fallbacks tried after GROQ_MODEL when a model is not found (404)
+    groq_models: str = "openai/gpt-oss-20b,openai/gpt-oss-120b"
     channel3_api_key: str = ""
     database_url: str = "sqlite:///./gawah.db"
     # Directories holding ES256 key files (generated on first run). Empty = ./keys
@@ -24,6 +26,14 @@ class Settings(BaseSettings):
     # Service keys: one per calling service (the UI uses SYSTEM3_KEY).
     system1_key: str = ""
     system3_key: str = ""
+    # Per-key request limit (sliding 60 s window, in memory, per process). 0 disables.
+    rate_limit_per_minute: int = 60
+    # GET /v1/ledger/stream: keepalive comment interval and database poll interval (seconds)
+    sse_keepalive_s: float = 15.0
+    sse_poll_s: float = 0.25
+    # Test switch: use the SIMULATED PayPal. Refused unless GAWAH_ENV=test.
+    gawah_env: str = ""
+    gawah_fake_paypal: bool = False
     # When true (default), /v1 endpoints return fixtures instead of running real logic.
     gawah_mock: bool = True
 

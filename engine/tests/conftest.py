@@ -146,12 +146,13 @@ API_HEADERS = {"X-Gawah-Key": "real-key"}
 @pytest.fixture
 def api(tmp_path, monkeypatch, use_fake_paypal):
     monkeypatch.setattr(settings, "gawah_mock", False)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "groq_api_key", "")
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'g.db'}")
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
-    with TestClient(app) as c:
+    with AutoKeyClient(app) as c:
         reg = {"merchant_id": "demo-shoe-store", "key_id": "demo-shoe-store-key-1",
                "alg": "ES256", "public_key_pem": public_key_pem(GUARDIAN_KEY)}
         assert c.post("/v1/merchants", json=reg, headers=API_HEADERS).status_code == 201
@@ -165,3 +166,44 @@ def api(tmp_path, monkeypatch, use_fake_paypal):
         yield c
 
 
+
+
+# ---- scoped test client -----------------------------------------------------------------------
+# Every /v1 route now belongs to exactly one service key (engine/gawah_engine/auth.py SCOPES).
+# Tests that exercise behaviour rather than authorization send this placeholder key and
+# AutoKeyClient swaps in whichever real key is allowed for that route. test_scopes.py uses the
+# real keys directly, so the authorization matrix itself is never auto-corrected.
+AUTO_KEY = "real-key"
+KEY_S1, KEY_S3 = "real-key-system1", "real-key-system3"
+
+
+def _allowed_service(method: str, path: str) -> str | None:
+    import re
+
+    from gawah_engine.auth import SCOPES
+
+    for service, routes in SCOPES.items():
+        for route in routes:
+            m, template = route.split(" ", 1)
+            pattern = "^" + re.sub(r"\{[^}]+\}", "[^/]+", template) + "$"
+            if m == method and re.match(pattern, path.split("?")[0]):
+                return service
+    return None
+
+
+class AutoKeyClient(TestClient):
+    def request(self, method, url, **kw):  # type: ignore[override]
+        headers = dict(kw.get("headers") or {})
+        if headers.get("X-Gawah-Key") == AUTO_KEY:
+            service = _allowed_service(method.upper(), str(url)) or "system1"
+            headers["X-Gawah-Key"] = KEY_S1 if service == "system1" else KEY_S3
+            kw["headers"] = headers
+        return super().request(method, url, **kw)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limiter():
+    from gawah_engine.auth import limiter
+
+    limiter.reset()
+    yield

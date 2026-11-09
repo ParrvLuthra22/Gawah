@@ -8,6 +8,7 @@ race-free. Schema changes are numbered migrations applied at startup by `init_db
 """
 
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -122,6 +123,10 @@ MIGRATIONS: list[list[str]] = [
         "CREATE INDEX payments_order ON payments(paypal_order_id)",
         "CREATE INDEX payments_capture ON payments(paypal_capture_id)",
     ],
+    # 5: cross-mandate cart reuse check looks a cart up by (merchant, cart) alone.
+    [
+        "CREATE INDEX proposals_cart_any ON proposals(merchant_id, cart_id)",
+    ],
 ]
 
 
@@ -155,13 +160,27 @@ def write_tx(path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switching to WAL needs exclusive access and SQLite does not use the busy timeout for it, so
+    two engine processes starting together on a new file can get "database is locked". Retry."""
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
+
+
 def init_db(path: str) -> None:
     """Create the file if needed and apply any pending migrations. Safe to call repeatedly."""
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = connect(path)
     try:
-        conn.execute("PRAGMA journal_mode = WAL")
+        _enable_wal(conn)
         for version, statements in enumerate(MIGRATIONS, start=1):
             if conn.execute("PRAGMA user_version").fetchone()[0] >= version:
                 continue

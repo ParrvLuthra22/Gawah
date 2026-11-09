@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from gawah_contract import LedgerEntry, LedgerEntryType
+from gawah_contract import LedgerEntry, LedgerEntryType, LedgerHead
 from gawah_contract.hashing import GENESIS_HASH
 
 from .canonical import canonical_json
@@ -180,6 +180,26 @@ class LedgerService:
             return [_to_entry(r) for r in conn.execute(sql + " ORDER BY seq", args)]
         finally:
             conn.close()
+
+    def head_seq(self) -> int:
+        conn = connect(self.path)
+        try:
+            row = conn.execute("SELECT MAX(seq) AS m FROM ledger").fetchone()
+        finally:
+            conn.close()
+        return row["m"] or 0
+
+    def head(self) -> LedgerHead:
+        """Latest seq and hash, signed by the ledger key (an anchor to display outside the system)."""
+        conn = connect(self.path)
+        try:
+            last = conn.execute("SELECT seq, hash FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        seq, h = (last["seq"], last["hash"]) if last else (0, GENESIS_HASH)
+        message = f"gawah-ledger-head:{seq}:{h}"
+        signature, key_id = self.signer.sign(message)
+        return LedgerHead(seq=seq, hash=h, message=message, signature=signature, key_id=key_id)
 
     def verify(self) -> dict[str, Any]:
         """Recompute every hash, prev_hash link and signature.

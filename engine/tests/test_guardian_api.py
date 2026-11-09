@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi.testclient import TestClient
+from conftest import KEY_S1, KEY_S3, AutoKeyClient
 from gawah_contract import ErrorResponse, LedgerVerifyResult, ProposalResult
 from gawah_contract.carts import generate_keypair, sign_cart
 from gawah_engine.config import settings
@@ -103,8 +103,9 @@ def test_unregistered_merchant_is_a_block_not_an_error(api):
 
 def test_mock_mode_proposals_unchanged(monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     from gawah_contract.fixtures import load
 
-    r = TestClient(app).post("/v1/proposals", json=load("proposal_shoes"), headers=H).json()
+    r = AutoKeyClient(app).post("/v1/proposals", json=load("proposal_shoes"), headers=H).json()
     assert r["decision"]["id"] == "dec_01" and r["payment"]["status"] == "PAID"

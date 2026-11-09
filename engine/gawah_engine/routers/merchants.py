@@ -3,6 +3,7 @@ from gawah_contract import MerchantKey
 
 from ..config import settings
 from ..errors import GawahError
+from ..harden import check_merchant_key
 from ..services import get_services
 
 router = APIRouter(prefix="/v1/merchants", tags=["merchants"])
@@ -26,6 +27,7 @@ _REGISTERED: dict[str, MerchantKey] = {
 
 @router.post("", response_model=MerchantKey, status_code=201)
 def register_merchant(body: MerchantKey) -> MerchantKey:
+    check_merchant_key(body)
     if not settings.gawah_mock:
         return get_services().merchants.register(body)
     _REGISTERED[body.merchant_id] = body
