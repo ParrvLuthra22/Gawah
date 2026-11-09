@@ -3,7 +3,7 @@ name = "gawah-contract"
 version = "0.1.0"
 description = "Shared Pydantic models, JSON schemas and fixtures for Gawah"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2"]
+dependencies = ["pydantic>=2", "cryptography"]
 
 [build-system]
 requires = ["hatchling"]

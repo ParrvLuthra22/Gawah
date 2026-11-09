@@ -7,6 +7,7 @@ from gawah_contract import MandateCreate
 from gawah_engine.db import db_path, init_db
 from gawah_engine.ledger_service import LedgerService
 from gawah_engine.mandate_service import MandateService
+from gawah_engine.merchant_service import MerchantService
 from gawah_engine.services import Services
 from gawah_engine.signing import ES256Signer
 
@@ -34,7 +35,7 @@ def svc(tmp_path, clock) -> Services:
     keys = tmp_path / "keys"
     ledger = LedgerService(path, ES256Signer(keys, "gawah-ledger-key"), clock=clock)
     mandates = MandateService(path, ES256Signer(keys, "gawah-mandate-key"), ledger, clock=clock)
-    return Services(path, ledger, mandates)
+    return Services(path, ledger, mandates, MerchantService(path, clock=clock))
 
 
 def make_body(clock: Clock | None = None, **over) -> MandateCreate:

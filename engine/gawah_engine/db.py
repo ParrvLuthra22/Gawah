@@ -61,6 +61,17 @@ MIGRATIONS: list[list[str]] = [
         """CREATE TRIGGER ledger_no_delete BEFORE DELETE ON ledger
            BEGIN SELECT RAISE(ABORT, 'ledger is append-only: DELETE blocked'); END""",
     ],
+    # 2: merchant registry (public keys only; one row per merchant key id)
+    [
+        """CREATE TABLE merchants (
+            merchant_id TEXT NOT NULL,
+            key_id TEXT NOT NULL,
+            alg TEXT NOT NULL,
+            public_key_pem TEXT NOT NULL,
+            registered_at TEXT NOT NULL,
+            PRIMARY KEY (merchant_id, key_id)
+        )""",
+    ],
 ]
 
 

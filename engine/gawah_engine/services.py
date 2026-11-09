@@ -7,6 +7,7 @@ from .config import settings
 from .db import db_path, init_db
 from .ledger_service import LedgerService
 from .mandate_service import MandateService
+from .merchant_service import MerchantService
 from .signing import ES256Signer
 
 
@@ -15,6 +16,7 @@ class Services:
     path: str
     ledger: LedgerService
     mandates: MandateService
+    merchants: MerchantService
 
 
 def build_services(
@@ -24,7 +26,7 @@ def build_services(
     init_db(path)
     ledger = LedgerService(path, ES256Signer(ledger_key_path or None, "gawah-ledger-key"))
     mandates = MandateService(path, ES256Signer(mandate_key_path or None, "gawah-mandate-key"), ledger)
-    return Services(path, ledger, mandates)
+    return Services(path, ledger, mandates, MerchantService(path))
 
 
 @lru_cache

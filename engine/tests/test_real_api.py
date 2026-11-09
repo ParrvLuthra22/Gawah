@@ -104,7 +104,7 @@ def test_revoking_an_expired_mandate_is_409(api):
 
 
 def test_unbuilt_endpoints_still_answer_501(api):
-    for path in ("/v1/payments", "/v1/evidence/pay_01", "/v1/merchants/demo-shoe-store/public-key"):
+    for path in ("/v1/payments", "/v1/evidence/pay_01"):
         assert api.get(path, headers=H).status_code == 501
 
 

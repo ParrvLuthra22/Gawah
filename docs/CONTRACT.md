@@ -36,6 +36,20 @@ Shapes are identical to the mock; only behaviour differs. Mandates and the ledge
 - **`GET /v1/ledger/verify`** recomputes every hash, `prev_hash` link, sequence number and signature. The response is `{ok, checked, first_broken_seq, reason}`; `reason` is a human-readable string when `ok` is false, otherwise null.
 - Verifying a ledger by hand with `gawah_contract.hashing.verify_chain` still works on real entries; it checks hashes and links but not signatures.
 
+## Signing carts (for System 1)
+
+The Guardian verifies every cart against the public key the store registered, so a store must sign exactly the way the Guardian checks. Use the shared helper, do not re-implement it:
+
+```python
+from gawah_contract.carts import generate_keypair, public_key_pem, sign_cart
+key = generate_keypair()                                   # once; keep the private key out of git
+cart = sign_cart(cart_dict, key, key_id="demo-shoe-store-key-1")   # returns a SignedCart with key_id + signature set
+```
+
+Register the public key once: `POST /v1/merchants {"merchant_id","key_id","alg":"ES256","public_key_pem": <PEM or JWK JSON string>}`. Only ES256 (EC P-256) keys are accepted; `alg` must be `ES256` in real mode. A `(merchant_id, key_id)` pair is write-once (a different key under the same id is 409 `KEY_ID_CONFLICT`); to rotate, register a new `key_id` and sign new carts with it. `GET /v1/merchants/{id}/public-key` returns the most recently registered key.
+
+What is signed: canonical JSON (sorted keys, no whitespace, ASCII-escaped) of the cart, `signature` removed, `key_id` included, timestamps normalised by the `SignedCart` model. Signature: base64url(r||s), no padding. `scripts/dev_merchant.py` makes a demo keypair for `demo-shoe-store` in `./keys/` (gitignored), registers it, and exposes `sign_cart(cart, private_key)`.
+
 ## The 7 objects
 
 - **Mandate**: `{"id":"man_01","user_id":"user_parrv","category":"footwear","item_description":"Black running shoes, size 9, under $80","max_amount_minor":8000,"currency":"USD","allowed_merchants":["demo-shoe-store"],"issued_at":"2026-11-09T10:00:00Z","expires_at":"2026-11-16T10:00:00Z","status":"active","signature":"...","signing_alg":"ed25519","key_id":"gawah-ledger-key-1"}` (status: active, revoked, expired)

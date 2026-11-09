@@ -40,9 +40,9 @@ install_error_handlers(app)
 
 # Mandates and the ledger have real logic (GAWAH_MOCK=0); the rest is still mock-only and
 # answers 501 in real mode.
-for r in (mandates.router, ledger.router):
+for r in (mandates.router, ledger.router, merchants.router):
     app.include_router(r, dependencies=[Depends(require_service_key)])
-for r in (proposals.router, payments.router, merchants.router):
+for r in (proposals.router, payments.router):
     app.include_router(r, dependencies=[Depends(require_service_key), Depends(require_mock)])
 
 
