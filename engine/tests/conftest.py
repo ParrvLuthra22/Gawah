@@ -4,13 +4,16 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from gawah_contract import MandateCreate
+from gawah_contract.carts import generate_keypair, public_key_pem
 from gawah_engine import services as services_module
 from gawah_engine.config import settings
 from gawah_engine.db import db_path, init_db
 from gawah_engine.evidence import EvidenceService
 from gawah_engine.guardian import GuardianService
 from gawah_engine.ledger_service import LedgerService
+from gawah_engine.main import app
 from gawah_engine.mandate_service import MandateService
 from gawah_engine.merchant_service import MerchantService
 from gawah_engine.payments import PaymentConfig, PaymentService
@@ -40,7 +43,7 @@ def clock() -> Clock:
     return Clock()
 
 
-def build_services(tmp_path, clock, paypal=None) -> Services:
+def build_services(tmp_path, clock, paypal=None, payment_config=None) -> Services:
     """Real services on a temp database. With `paypal` (a FakePayPal) the Guardian also pays."""
     path = db_path(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(path)
@@ -49,7 +52,7 @@ def build_services(tmp_path, clock, paypal=None) -> Services:
     mandates = MandateService(path, ES256Signer(keys, "gawah-mandate-key"), ledger, clock=clock)
     merchants = MerchantService(path, clock=clock)
     semantic = SemanticChecker(path, clock=clock)  # no key: deterministic fallback
-    config = PaymentConfig()
+    config = payment_config or PaymentConfig()
     if paypal is not None:
         config = PaymentConfig(
             client_id="test-client", client_secret="test-secret", transport=paypal.transport,
@@ -59,7 +62,7 @@ def build_services(tmp_path, clock, paypal=None) -> Services:
     payments = PaymentService(path, mandates, ledger, config, clock=clock, sleep=lambda s: None)
     guardian = GuardianService(
         path, mandates, merchants, ledger, semantic, clock=clock,
-        payments=payments if paypal is not None else None,
+        payments=payments if (paypal is not None or payment_config is not None) else None,
     )
     evidence = EvidenceService(path, mandates, merchants, ledger, payments)
     return Services(path, ledger, mandates, merchants, guardian, payments, evidence)
@@ -134,3 +137,31 @@ def use_fake_paypal(monkeypatch, paypal):
     monkeypatch.setattr(settings, "paypal_card_cvv", TEST_CARD["security_code"])
     monkeypatch.setattr(services_module, "paypal_transport_override", paypal.transport)
     return paypal
+
+
+GUARDIAN_KEY = generate_keypair()
+API_HEADERS = {"X-Gawah-Key": "real-key"}
+
+
+@pytest.fixture
+def api(tmp_path, monkeypatch, use_fake_paypal):
+    monkeypatch.setattr(settings, "gawah_mock", False)
+    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "groq_api_key", "")
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'g.db'}")
+    monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
+    monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
+    with TestClient(app) as c:
+        reg = {"merchant_id": "demo-shoe-store", "key_id": "demo-shoe-store-key-1",
+               "alg": "ES256", "public_key_pem": public_key_pem(GUARDIAN_KEY)}
+        assert c.post("/v1/merchants", json=reg, headers=API_HEADERS).status_code == 201
+        m = c.post("/v1/mandates", headers=API_HEADERS, json={
+            "user_id": "u1", "category": "footwear",
+            "item_description": "Black running shoes, size 9, under $80",
+            "max_amount_minor": 8000, "currency": "USD",
+            "allowed_merchants": ["demo-shoe-store"], "expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat().replace('+00:00', 'Z'),
+        }).json()
+        c.mandate_id = m["id"]
+        yield c
+
+

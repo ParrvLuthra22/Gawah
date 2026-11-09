@@ -27,6 +27,7 @@ class FakePayPal:
         self._ids = itertools.count(1)
         self.create_status = "COMPLETED"  # "CREATED" makes the engine call capture separately
         self.failures: dict[str, list] = {}  # endpoint -> queue of failures to inject
+        self.hooks: list = []  # called (outside the fake's lock) at the start of every API call
         self.transport = httpx.MockTransport(self)
 
     # ---- helpers for tests ----------------------------------------------------------------
@@ -44,6 +45,8 @@ class FakePayPal:
         if path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": "fake-token", "expires_in": 32400})
         endpoint = self._endpoint(method, path)
+        for hook in self.hooks:
+            hook(endpoint)
         rid = request.headers.get("paypal-request-id")
         body = request.content.decode() if request.content else ""
         with self.lock:

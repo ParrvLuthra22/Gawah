@@ -322,7 +322,24 @@ class PaymentService:
         if row is not None and row["paypal_order_id"]:
             # The order exists: never guess. Ask PayPal what really happened.
             return self.reconcile_one(payment_id, attempts=attempts, hint=reason)
+        if isinstance(exc, httpx.TransportError):
+            # No answer at all and no order id: PayPal may or may not have created (and even
+            # captured) the order. Do not release the budget on a guess; hold it for review.
+            return self._mark_unknown(
+                payment_id,
+                f"outcome unknown after {attempts} attempts ({reason}); check PayPal for this "
+                "payment's custom_id before releasing",
+            )
         return self._finalize_failed(payment_id, reason, attempts)
+
+    def _mark_unknown(self, payment_id: str, why: str) -> PaymentRecord:
+        with write_tx(self.path) as conn:
+            conn.execute(
+                "UPDATE payments SET failure_reason = ?, paypal_status = 'UNKNOWN', updated_at = ?"
+                " WHERE id = ? AND status = 'RESERVED'",
+                (why[:300], format_ts(self.clock()), payment_id),
+            )
+        return self.get(payment_id)
 
     def _apply_order(self, payment_id: str, order: dict[str, Any], attempts: int) -> PaymentRecord:
         outcome, capture_id, reason = classify_order(order)
@@ -409,19 +426,14 @@ class PaymentService:
         if row is None or row["status"] != "RESERVED":
             return self.get(payment_id)
         if not row["paypal_order_id"]:
+            if row["paypal_status"] == "UNKNOWN":  # a call may have reached PayPal: needs a human
+                return self.to_record(row)
             return self._finalize_failed(payment_id, "interrupted before order creation", attempts)
         counter = {"n": 0}
         try:
             order = self._retry(lambda: self.client().get_order(row["paypal_order_id"]), counter)
         except Exception as exc:  # noqa: BLE001  PayPal unreachable: stay RESERVED, retry later
-            with write_tx(self.path) as conn:
-                conn.execute(
-                    "UPDATE payments SET failure_reason = ?, paypal_status = 'UNKNOWN',"
-                    " updated_at = ? WHERE id = ?",
-                    (f"outcome unknown: {hint or describe_error(exc)}"[:300],
-                     format_ts(self.clock()), payment_id),
-                )
-            return self.get(payment_id)
+            return self._mark_unknown(payment_id, f"outcome unknown: {hint or describe_error(exc)}")
         return self._apply_order(payment_id, order, attempts)
 
     def reconcile(self) -> dict[str, int]:
