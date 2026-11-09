@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     channel3_api_key: str = ""
     database_url: str = "sqlite:///./gawah.db"
+    # Directories holding ES256 key files (generated on first run). Empty = ./keys
     ledger_signing_key_path: str = ""
+    mandate_signing_key_path: str = ""
     # Service keys: one per calling service (the UI uses SYSTEM3_KEY).
     system1_key: str = ""
     system3_key: str = ""

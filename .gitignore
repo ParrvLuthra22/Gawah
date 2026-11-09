@@ -19,6 +19,9 @@ npm-debug.log*
 .env.*
 !.env.example
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 keys/
 *.pem
 
