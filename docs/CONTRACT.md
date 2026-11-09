@@ -28,7 +28,7 @@ Every error has this shape (`ErrorResponse`): HTTP 401 bad key, 404 not found, 4
 
 ## Real mode (`GAWAH_MOCK=0`)
 
-Shapes are identical to the mock; only behaviour differs. Mandates, merchants, the ledger and the Guardian (`POST /v1/proposals`, `POST /v1/guardian/check`) are real (SQLite at `DATABASE_URL`, default `sqlite:///./gawah.db`). Payments and evidence still answer 501 until built; `POST /v1/proposals` returns `payment: null` for now.
+Shapes are identical to the mock; only behaviour differs. Everything is real (SQLite at `DATABASE_URL`, default `sqlite:///./gawah.db`): mandates, merchants, the ledger, the Guardian, payments (PayPal sandbox), refunds and evidence. No endpoint answers 501 in real mode. `POST /v1/proposals` returns `payment: null` when the Guardian blocks, otherwise the payment record (`PAID` or `FAILED`; `RESERVED` only if the outcome is unknown, see below).
 
 - **Mandates**: `id` is `man_<12 hex>`; `issued_at` is set by the engine (UTC, whole seconds); `currency` is upper-cased; `expires_at` must have a timezone and be in the future, `max_amount_minor` > 0, `allowed_merchants` non-empty (422 otherwise). `signing_alg` is `ES256` and `key_id` looks like `gawah-mandate-key-1` (the mock fixtures say `ed25519`). The signature covers the immutable terms (id, user_id, category, item_description, max_amount_minor, currency, allowed_merchants, issued_at, expires_at), not `status`.
 - **Status**: a mandate past `expires_at` becomes `expired` the next time it is read. `POST /v1/mandates/{id}/revoke` is idempotent for an already-revoked mandate (200, no second ledger entry) and returns 409 `MANDATE_NOT_ACTIVE` for an expired one.
@@ -40,6 +40,29 @@ Shapes are identical to the mock; only behaviour differs. Mandates, merchants, t
 - **Ledger**: creating a mandate appends `MANDATE_CREATED` and revoking appends `MANDATE_REVOKED` (`subject_id` and `data.mandate_id` are the mandate id), in the same transaction as the mandate change. `ts` has whole-second precision. `signature` is ES256 over the entry `hash`, with `key_id` naming the ledger key (`gawah-ledger-key-N`), so rotated keys still verify old entries. The database blocks UPDATE and DELETE on the ledger. `GET /v1/ledger` also accepts `type=` and `since_seq=` (also honoured in mock mode).
 - **`GET /v1/ledger/verify`** recomputes every hash, `prev_hash` link, sequence number and signature. The response is `{ok, checked, first_broken_seq, reason}`; `reason` is a human-readable string when `ok` is false, otherwise null.
 - Verifying a ledger by hand with `gawah_contract.hashing.verify_chain` still works on real entries; it checks hashes and links but not signatures.
+
+## Payments (real mode)
+
+**Flow of `POST /v1/proposals`** (write first, pay second):
+
+1. `PROPOSAL_RECEIVED` is committed.
+2. Under a per-mandate lock and one SQLite write transaction: evaluate the rules against the *current* mandate status and budget (remaining already subtracts reservations), write `DECISION_MADE`, and, on ALLOW, reserve the amount, create the payment as `RESERVED` and append `PAYMENT_STARTED`. Concurrent proposals for one mandate are serialised here, so two $65 proposals against an $80 mandate give exactly one ALLOW and one `OVER_BUDGET`. A revoke that lands before this step blocks the payment (`MANDATE_REVOKED`).
+3. After the lock is released, PayPal is called: create the order with `custom_id = gawah:{proposal_id}:{ledger_seq}` (`ledger_seq` is the `PAYMENT_STARTED` entry, so PayPal's record points back to our ledger) and `PayPal-Request-Id = idem-{proposal_id}`, then pay it with the buyer card from the engine's environment. The order id is stored as soon as it exists, the capture id after capture.
+4. Success: `PAID`, reservation committed (moves to `spent`), `PAYMENT_COMPLETED` with `paypal_order_id`, `paypal_capture_id`, `custom_id`. Failure: `FAILED`, reservation released, `PAYMENT_FAILED` with a safe reason (HTTP status, PayPal error name and issue codes, `debug_id`; never raw bodies or card data).
+
+BLOCK means no reservation, no PayPal call and `payment: null`. Sending the same proposal `id` again returns the stored decision and payment; the database allows one payment per proposal (`proposal_id` is unique).
+
+**Retries and unknown outcomes.** Timeouts, 429 and 5xx are retried up to 3 times with exponential backoff and the same `PayPal-Request-Id`, so PayPal replays rather than duplicates. Other 4xx fail at once. If the answer is lost after an order exists, the engine reads the order from PayPal and records what PayPal says. If the request failed with no response and no order id is known, the payment stays `RESERVED` (budget held, internal `paypal_status=UNKNOWN`) for manual review rather than releasing budget on a guess.
+
+**Restart recovery.** On startup (real mode) every `RESERVED` payment is reconciled: with an order id the order is read and finalized as `PAID` or `FAILED`; without one it becomes `FAILED` ("interrupted before order creation") with `PAYMENT_FAILED` and the reservation released. Known risk: a crash after PayPal accepted the create but before the order id was saved is reconciled as "interrupted", so look the order up by `custom_id` if in doubt.
+
+**Refunds.** `POST /v1/payments/{id}/refund` is a full refund of a `PAID` payment (`refund_capture`, idempotency key `idem-{proposal_id}-refund`). The payment becomes `REFUNDED` and `REFUNDED` is appended to the ledger. A second call returns the same record and does nothing. A payment that is not `PAID` (including `FAILED`) is 409 `PAYMENT_NOT_REFUNDABLE`; unknown id 404; PayPal rejecting the refund is 502 `REFUND_FAILED` and the payment stays `PAID`. **Budget rule: a refund gives the spent amount back to the mandate** (`spent_minor` decreases), so a refunded $65 purchase leaves the full $80 available again.
+
+**Filters.** `GET /v1/payments` accepts `mandate_id`, `status`, `paypal_order_id`, `paypal_capture_id` (combinable).
+
+**Evidence verification.** `GET /v1/evidence/{payment_id}` returns the `EvidenceBundle`: mandate, proposal, signed cart, decision (advisories are included in `explanation`), payment, and every ledger entry for the mandate, proposal, decision and payment, in `seq` order. `verification` is computed live and `ok` is true only if all three hold: the ledger chain verifies (hashes, links, signatures), the mandate signature verifies, and the cart signature verifies against the registered merchant key. `checked` and `first_broken_seq` come from the ledger check; `reason` lists every failed check. The contract has no per-check flags, so a mandate or cart failure shows only in `ok` and `reason`.
+
+**Configuration.** PayPal credentials and the sandbox buyer card (`PAYPAL_CARD_NUMBER`, `PAYPAL_CARD_EXPIRY`, `PAYPAL_CARD_CVV`, `PAYPAL_CARD_NAME`) are read only from the environment. They are never written to the database, ledger, logs or API responses.
 
 ## Signing carts (for System 1)
 
@@ -77,8 +100,8 @@ All examples assume `H='X-Gawah-Key: yourkey'` and `B=http://localhost:8000`.
 | `GET /v1/mandates/{id}/budget` | `BudgetStatus`: `{mandate_id, max_amount_minor, spent_minor, reserved_minor, remaining_minor, currency}`; remaining = max - spent - reserved |
 | `POST /v1/proposals` | Guardian, then payment, then ledger. Returns `{decision, payment or null}` |
 | `POST /v1/guardian/check` | Dry run: decision only, no payment, no ledger write |
-| `GET /v1/payments`, `GET /v1/payments/{id}` | List / fetch |
-| `POST /v1/payments/{id}/refund` | Refund |
+| `GET /v1/payments?mandate_id=&status=&paypal_order_id=&paypal_capture_id=`, `GET /v1/payments/{id}` | List (filters combine) / fetch |
+| `POST /v1/payments/{id}/refund` | Full refund of a PAID payment; idempotent; returns the spent amount to the mandate budget |
 | `GET /v1/ledger?mandate_id=&subject_id=` | Ledger entries |
 | `GET /v1/ledger/verify` | `{ok, checked, first_broken_seq, reason}` (`reason` is null when ok) |
 | `GET /v1/evidence/{payment_id}` | Full bundle for Dispute Counsel: mandate, proposal, signed cart, decision, payment, ledger entries, verification |
