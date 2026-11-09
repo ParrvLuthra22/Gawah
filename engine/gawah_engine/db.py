@@ -72,6 +72,30 @@ MIGRATIONS: list[list[str]] = [
             PRIMARY KEY (merchant_id, key_id)
         )""",
     ],
+    # 3: Guardian: proposals, decisions (one per proposal id), semantic-check cache
+    [
+        """CREATE TABLE proposals (
+            id TEXT PRIMARY KEY,
+            mandate_id TEXT NOT NULL,
+            merchant_id TEXT NOT NULL,
+            cart_id TEXT NOT NULL,
+            body TEXT NOT NULL,
+            received_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX proposals_cart ON proposals(mandate_id, merchant_id, cart_id)",
+        """CREATE TABLE decisions (
+            id TEXT PRIMARY KEY,
+            proposal_id TEXT NOT NULL UNIQUE REFERENCES proposals(id),
+            body TEXT NOT NULL,
+            advisories TEXT NOT NULL,
+            decided_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE semantic_cache (
+            key TEXT PRIMARY KEY,
+            result TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""",
+    ],
 ]
 
 

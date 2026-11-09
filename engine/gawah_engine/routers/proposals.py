@@ -8,6 +8,9 @@ from gawah_contract import (
 )
 from gawah_contract.fixtures import load
 
+from ..config import settings
+from ..services import get_services
+
 router = APIRouter(prefix="/v1", tags=["proposals"])
 
 # Mock behaviour: known fixture proposal ids get their fixture decision. Any other proposal
@@ -34,6 +37,8 @@ def mock_decide(p: PurchaseProposal) -> GuardianDecision:
 
 @router.post("/proposals", response_model=ProposalResult)
 def submit_proposal(p: PurchaseProposal) -> ProposalResult:
+    if not settings.gawah_mock:
+        return get_services().guardian.submit(p)
     d = mock_decide(p)
     if d.verdict == Verdict.BLOCK:
         return ProposalResult(decision=d, payment=None)
@@ -54,5 +59,7 @@ def submit_proposal(p: PurchaseProposal) -> ProposalResult:
 @router.post("/guardian/check", response_model=GuardianDecision)
 def guardian_check(p: PurchaseProposal) -> GuardianDecision:
     """Dry run: no payment, no ledger write."""
+    if not settings.gawah_mock:
+        return get_services().guardian.check(p)
     return mock_decide(p)
 

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     buyer_email: str = ""
     buyer_password: str = ""
     groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
     channel3_api_key: str = ""
     database_url: str = "sqlite:///./gawah.db"
     # Directories holding ES256 key files (generated on first run). Empty = ./keys
