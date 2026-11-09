@@ -1,0 +1,29 @@
+[project]
+name = "gawah-shopper"
+version = "0.1.0"
+description = "Gawah System 1 - AI Shopping Agent"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "groq",
+    "httpx",
+    "pydantic-settings",
+    "gawah-contract",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+gawah-contract = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["shopper"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]

@@ -1,0 +1,22 @@
+"""Runtime configuration for the System 1 shopper service."""
+
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
+class Settings(BaseSettings):
+    """Settings loaded from process environment, falling back to the root .env file."""
+
+    groq_api_key: str
+    # "auto" discovers currently enabled Groq models and uses the approved priority list.
+    groq_model: str = "auto"
+    product_provider: Literal["demo", "channel3"] = "demo"
+    model_config = SettingsConfigDict(
+        env_file=ROOT_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
