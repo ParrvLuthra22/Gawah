@@ -5,20 +5,19 @@ does not stop at the first failure) and BLOCKs if any hard rule fails; the decis
 reason codes. The signed cart is the source of truth, never the proposal.
 
 Rules, in the order reasons are reported:
-  MANDATE_REVOKED / MANDATE_EXPIRED   mandate signature invalid, revoked, or expired
-  CART_SIGNATURE_INVALID              cart signature bad, signing key unknown, or cart expired
+  MANDATE_SIGNATURE_INVALID           mandate signature does not verify
+  MANDATE_REVOKED / MANDATE_EXPIRED   mandate revoked, or past its expires_at
+  MERCHANT_NOT_REGISTERED             the cart's merchant has no public key on file
+  CART_SIGNATURE_INVALID              cart signature bad, or signed with an unknown key id
+  CART_EXPIRED                        the cart is past its expires_at
+  MERCHANT_MISMATCH                   the cart is from a different merchant than the proposal
   PRICE_MISMATCH                      proposal disagrees with the signed cart (price, quantity,
                                       total, currency, or the product is not in the cart)
-  MERCHANT_NOT_ALLOWED                merchant not in the mandate, not registered, or the cart
-                                      is from a different merchant than the proposal names
+  MERCHANT_NOT_ALLOWED                merchant (cart's or proposal's) not in the mandate
   CURRENCY_MISMATCH                   cart currency differs from the mandate currency
   OVER_BUDGET                         cart total exceeds the remaining budget
   DUPLICATE                           same merchant + cart + mandate proposed again within 60 s
   CATEGORY_MISMATCH                   semantic check (only if all of the above passed)
-
-Existing ReasonCode values are reused where no exact code exists (see `docs/CONTRACT.md`):
-  invalid mandate signature -> MANDATE_REVOKED, expired cart -> CART_SIGNATURE_INVALID,
-  cart/proposal merchant mismatch or unregistered merchant -> MERCHANT_NOT_ALLOWED.
 
 Variant problems (size, colour) never block. They are returned as `advisories`, stored in the
 DECISION_MADE ledger entry and appended to the explanation, so Dispute Counsel can later
@@ -168,8 +167,10 @@ class Guardian:
                 fail(R.MANDATE_EXPIRED, "the mandate has expired")
             elif why == "MANDATE_REVOKED":
                 fail(R.MANDATE_REVOKED, "the mandate was revoked")
+            elif why == "MANDATE_SIGNATURE_INVALID":
+                fail(R.MANDATE_SIGNATURE_INVALID, "the mandate signature does not verify")
             else:
-                fail(R.MANDATE_REVOKED, f"the mandate cannot be trusted ({why})")
+                fail(R.MANDATE_SIGNATURE_INVALID, f"the mandate cannot be trusted ({why})")
         elif mandate_check is None and check_revocation(mandate):
             fail(R.MANDATE_REVOKED, "the mandate was revoked")
         if check_expiry(mandate, now) and not any(c == R.MANDATE_EXPIRED for c, _ in fails):
@@ -177,7 +178,7 @@ class Guardian:
 
         # 2. cart authenticity
         if not merchant_registered:
-            fail(R.MERCHANT_NOT_ALLOWED, f"merchant '{cart.merchant_id}' is not registered")
+            fail(R.MERCHANT_NOT_REGISTERED, f"merchant '{cart.merchant_id}' is not registered")
         elif merchant_key is None:
             fail(R.CART_SIGNATURE_INVALID, f"the cart is signed with unknown key '{cart.key_id}'")
         else:
@@ -188,10 +189,10 @@ class Guardian:
             if not ok:
                 fail(R.CART_SIGNATURE_INVALID, "the cart signature does not verify")
         if cart.expires_at <= now:
-            fail(R.CART_SIGNATURE_INVALID, f"the cart expired at {format_ts(cart.expires_at)}")
+            fail(R.CART_EXPIRED, f"the cart expired at {format_ts(cart.expires_at)}")
         if cart.merchant_id != proposal.merchant_id:
             fail(
-                R.MERCHANT_NOT_ALLOWED,
+                R.MERCHANT_MISMATCH,
                 f"the cart is from '{cart.merchant_id}' but the proposal names "
                 f"'{proposal.merchant_id}'",
             )

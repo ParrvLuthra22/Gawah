@@ -118,7 +118,8 @@ def test_unregistered_merchant_is_a_block_not_an_error(api):
     p["merchant_id"] = "ghost-store"
     p["signed_cart"] = sign_cart({**p["signed_cart"], "merchant_id": "ghost-store"}, generate_keypair(), "ghost-1").model_dump(mode="json")
     r = api.post("/v1/proposals", json=p, headers=H).json()
-    assert r["decision"]["verdict"] == "BLOCK" and r["decision"]["reasons"] == ["MERCHANT_NOT_ALLOWED"]
+    assert r["decision"]["verdict"] == "BLOCK" and r["decision"]["reasons"] == [
+        "MERCHANT_NOT_REGISTERED", "MERCHANT_NOT_ALLOWED"]
 
 
 def test_mock_mode_proposals_unchanged(monkeypatch):

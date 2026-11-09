@@ -487,7 +487,11 @@
         "CURRENCY_MISMATCH",
         "CATEGORY_MISMATCH",
         "DUPLICATE",
-        "PRICE_MISMATCH"
+        "PRICE_MISMATCH",
+        "MANDATE_SIGNATURE_INVALID",
+        "CART_EXPIRED",
+        "MERCHANT_MISMATCH",
+        "MERCHANT_NOT_REGISTERED"
       ],
       "title": "ReasonCode",
       "type": "string"

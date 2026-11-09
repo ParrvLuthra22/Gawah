@@ -189,7 +189,10 @@ def _after_reservation(w):
 CASES = [
     pytest.param(lambda w: w.proposal(), "ALLOW", [], id="01-shoes-65-allow"),
     pytest.param(_over_budget, "BLOCK", ["OVER_BUDGET"], id="02-120-over-budget"),
-    pytest.param(_bad_merchant_unregistered, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="03a-unregistered-merchant"),
+    pytest.param(
+        _bad_merchant_unregistered, "BLOCK", ["MERCHANT_NOT_REGISTERED", "MERCHANT_NOT_ALLOWED"],
+        id="03a-unregistered-merchant",
+    ),
     pytest.param(_bad_merchant_registered, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="03b-merchant-not-in-mandate"),
     pytest.param(_tampered_cart, "BLOCK", ["CART_SIGNATURE_INVALID"], id="04-tampered-cart"),
     pytest.param(_price_mismatch, "BLOCK", ["PRICE_MISMATCH"], id="05-proposal-price-differs"),
@@ -209,8 +212,11 @@ CASES = [
     pytest.param(_watch_without_model, "BLOCK", ["CATEGORY_MISMATCH"], id="14c-watch-fallback"),
     pytest.param(_after_reservation, "BLOCK", ["OVER_BUDGET"], id="16-budget-reduced-by-reservation"),
     pytest.param(_unknown_cart_key, "BLOCK", ["CART_SIGNATURE_INVALID"], id="x-unknown-cart-key-id"),
-    pytest.param(_cart_expired, "BLOCK", ["CART_SIGNATURE_INVALID"], id="x-cart-expired"),
-    pytest.param(_cart_merchant_differs, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="x-cart-merchant-differs"),
+    pytest.param(_cart_expired, "BLOCK", ["CART_EXPIRED"], id="x-cart-expired"),
+    pytest.param(
+        _cart_merchant_differs, "BLOCK", ["MERCHANT_MISMATCH", "MERCHANT_NOT_ALLOWED"],
+        id="x-cart-merchant-differs",
+    ),
 ]
 
 
@@ -434,6 +440,17 @@ def test_guardian_evaluate_is_a_pure_function_call(w):
     assert Guardian.evaluate(p, w.mandate, key, 8000, now, **kw) == d  # deterministic
     assert Guardian.evaluate(p, w.mandate, key, 100, now, **kw).reasons == [ReasonCode.OVER_BUDGET]
     bad = Guardian.evaluate(p, w.mandate, None, 8000, now, merchant_registered=False, **kw)
-    assert bad.reasons == [ReasonCode.MERCHANT_NOT_ALLOWED]
+    assert bad.reasons == [ReasonCode.MERCHANT_NOT_REGISTERED]
     forged = Guardian.evaluate(p, w.mandate, key, 8000, now, mandate_check=(False, "MANDATE_SIGNATURE_INVALID"))
-    assert forged.verdict == Verdict.BLOCK and forged.reasons == [ReasonCode.MANDATE_REVOKED]
+    assert forged.verdict == Verdict.BLOCK
+    assert forged.reasons == [ReasonCode.MANDATE_SIGNATURE_INVALID]
+
+
+def test_tampered_mandate_is_reported_as_signature_invalid(w):
+    p = w.proposal()
+    forged = w.mandate.model_copy(update={"max_amount_minor": 900000})  # signed terms edited
+    d = Guardian.evaluate(
+        p, forged, w.svc.merchants.get(STORE, KEY_ID), 900000, w.clock(),
+        mandate_check=w.svc.mandates.verify_mandate(forged),
+    )
+    assert d.reasons == [ReasonCode.MANDATE_SIGNATURE_INVALID]
