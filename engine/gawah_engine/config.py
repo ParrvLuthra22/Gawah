@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_env: str = "sandbox"
+    # Sandbox test card for the card payment route. Config only: never hard-code, log or ledger.
+    paypal_card_number: str = ""
+    paypal_card_expiry: str = ""  # YYYY-MM
+    paypal_card_cvv: str = ""
+    paypal_card_name: str = "Gawah Demo"
     buyer_email: str = ""
     buyer_password: str = ""
     groq_api_key: str = ""

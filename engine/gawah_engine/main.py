@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from .auth import require_mock, require_service_key
+from .auth import require_service_key
 from .config import settings
 from .errors import install_error_handlers
 from .routers import ledger, mandates, merchants, payments, proposals
@@ -14,7 +14,9 @@ from .services import get_services
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if not settings.gawah_mock:
-        get_services()  # create the database, run migrations, create signing keys
+        # create the database, run migrations, create signing keys, then settle any payment
+        # a crash left in RESERVED (reads PayPal; never guesses)
+        get_services().payments.reconcile()
     yield
 
 
@@ -40,10 +42,10 @@ install_error_handlers(app)
 
 # Mandates and the ledger have real logic (GAWAH_MOCK=0); the rest is still mock-only and
 # answers 501 in real mode.
-for r in (mandates.router, ledger.router, merchants.router, proposals.router):
+for r in (
+    mandates.router, ledger.router, merchants.router, proposals.router, payments.router
+):
     app.include_router(r, dependencies=[Depends(require_service_key)])
-for r in (payments.router,):
-    app.include_router(r, dependencies=[Depends(require_service_key), Depends(require_mock)])
 
 
 @app.get("/health")

@@ -103,10 +103,12 @@ def test_revoking_an_expired_mandate_is_409(api):
     assert api.post(f"/v1/mandates/{m['id']}/revoke", headers=H).status_code == 409
 
 
-def test_unbuilt_endpoints_still_answer_501(api):
-    for path in ("/v1/payments", "/v1/evidence/pay_01"):
-        assert api.get(path, headers=H).status_code == 501
-
+def test_no_endpoint_answers_501_in_real_mode(api):
+    assert api.get("/v1/payments", headers=H).json() == []
+    assert api.get("/v1/payments/pay_x", headers=H).status_code == 404
+    assert api.post("/v1/payments/pay_x/refund", headers=H).status_code == 404
+    assert api.get("/v1/evidence/pay_x", headers=H).status_code == 404
+    assert api.get("/v1/merchants/nobody/public-key", headers=H).status_code == 404
 
 def test_mock_mode_never_touches_the_database(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)

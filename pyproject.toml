@@ -29,6 +29,7 @@ packages = ["engine/gawah_engine"]
 [tool.pytest.ini_options]
 testpaths = ["engine/tests", "contract/tests"]
 pythonpath = ["engine"]
+markers = ["live: talks to the real PayPal sandbox; runs only with GAWAH_LIVE=1"]
 
 [tool.ruff]
 line-length = 100

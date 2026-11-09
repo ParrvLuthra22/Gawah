@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from gawah_contract import EvidenceBundle, LedgerEntry, LedgerEntryType, LedgerVerifyResult
 from gawah_contract.fixtures import load
 from gawah_contract.hashing import verify_chain
 
-from ..auth import require_mock
 from ..config import settings
 from ..errors import GawahError
 from ..services import get_services
@@ -49,8 +48,10 @@ def verify_ledger() -> LedgerVerifyResult:
     )
 
 
-@router.get("/evidence/{payment_id}", response_model=EvidenceBundle, dependencies=[Depends(require_mock)])
+@router.get("/evidence/{payment_id}", response_model=EvidenceBundle)
 def get_evidence(payment_id: str) -> EvidenceBundle:
+    if not settings.gawah_mock:
+        return get_services().evidence.bundle(payment_id)
     names = {"pay_01": "evidence_bundle", "pay_04": "evidence_bundle_wrong_size"}
     if payment_id not in names:
         raise GawahError(404, "PAYMENT_NOT_FOUND", f"No evidence for payment {payment_id}")

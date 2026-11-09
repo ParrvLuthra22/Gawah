@@ -113,11 +113,15 @@ def test_merchants():
     assert client.get("/v1/merchants/m2/public-key", headers=H1).json()["key_id"] == "k2"
 
 
-def test_non_mock_mode_returns_501(monkeypatch):
-    # Mandates and the ledger are real in GAWAH_MOCK=0; payments are still unbuilt.
+def test_non_mock_mode_uses_real_logic_not_501(monkeypatch, tmp_path):
+    # Every endpoint has real logic now; real mode must never answer 501.
     monkeypatch.setattr(settings, "gawah_mock", False)
-    r = client.get("/v1/payments", headers=H1)
-    assert r.status_code == 501
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'm.db'}")
+    monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
+    monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
+    for path in ("/v1/mandates", "/v1/payments", "/v1/ledger"):
+        assert client.get(path, headers=H1).status_code == 200
+    assert client.get("/v1/payments/pay_01", headers=H1).status_code == 404
 
 
 def test_mock_budget():

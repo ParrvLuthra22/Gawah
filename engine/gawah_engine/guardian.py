@@ -27,6 +27,7 @@ concede an allowed-but-wrong purchase.
 import json
 import re
 import sqlite3
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -56,7 +57,8 @@ from .mandate_service import (
     check_revocation,
 )
 from .merchant_service import MerchantService
-from .semantic import SemanticChecker, SemanticResult
+from .payments import PaymentService
+from .semantic import SemanticChecker, SemanticResult, keyword_check
 
 DUPLICATE_WINDOW_S = 60
 
@@ -312,7 +314,16 @@ class Guardian:
 
 
 class GuardianService:
-    """Loads Guardian inputs, writes the ledger (write first), stores one decision per proposal."""
+    """Loads Guardian inputs, writes the ledger (write first), stores one decision per proposal.
+
+    Concurrency: proposals for the same mandate are serialised by a per-mandate lock. Inside it,
+    the authoritative evaluation, the budget reservation, the payment row, DECISION_MADE and
+    PAYMENT_STARTED are written in ONE `BEGIN IMMEDIATE` transaction, with the mandate status and
+    remaining budget re-read inside that transaction (so a revocation that lands mid-flight is
+    honoured and the budget already subtracts every reservation). PayPal is called only after
+    the lock is released and the transaction has committed. (The lock is per process; across
+    processes the SQLite write lock is what keeps reservations safe.)
+    """
 
     def __init__(
         self,
@@ -322,20 +333,30 @@ class GuardianService:
         ledger: LedgerService,
         semantic: SemanticChecker,
         clock: Callable[[], datetime] = utcnow,
+        payments: PaymentService | None = None,
     ):
         self.path, self.mandates, self.merchants = path, mandates, merchants
-        self.ledger, self.semantic, self.clock = ledger, semantic, clock
+        self.ledger, self.semantic, self.clock, self.payments = ledger, semantic, clock, payments
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _mandate_lock(self, mandate_id: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(mandate_id, threading.Lock())
 
     def _mandate(self, mandate_id: str) -> Mandate:
         return self.mandates.get(mandate_id)  # raises MandateNotFound (404)
 
-    def _duplicate_of(self, conn: sqlite3.Connection, p: PurchaseProposal, now: datetime) -> str | None:
+    def _duplicate_of(
+        self, conn: sqlite3.Connection, p: PurchaseProposal, now: datetime
+    ) -> str | None:
         """An earlier proposal for the same mandate, merchant and cart within 60 s that was
         allowed or is still being decided."""
         row = conn.execute(
             "SELECT p.id FROM proposals p LEFT JOIN decisions d ON d.proposal_id = p.id"
             " WHERE p.id != ? AND p.mandate_id = ? AND p.merchant_id = ? AND p.cart_id = ?"
-            " AND p.received_at >= ? AND (d.id IS NULL OR json_extract(d.body, '$.verdict') = 'ALLOW')"
+            " AND p.received_at >= ?"
+            " AND (d.id IS NULL OR json_extract(d.body, '$.verdict') = 'ALLOW')"
             " ORDER BY p.received_at, p.rowid LIMIT 1",
             (
                 p.id,
@@ -348,7 +369,14 @@ class GuardianService:
         return row["id"] if row else None
 
     def _evaluate(
-        self, p: PurchaseProposal, mandate: Mandate, now: datetime, duplicate_of: str | None
+        self,
+        p: PurchaseProposal,
+        mandate: Mandate,
+        remaining: int,
+        mandate_check: tuple[bool, str | None],
+        now: datetime,
+        duplicate_of: str | None,
+        semantic: SemanticFn,
     ) -> Evaluation:
         cart = p.signed_cart
         key = self.merchants.get(cart.merchant_id, cart.key_id)
@@ -357,12 +385,12 @@ class GuardianService:
             p,
             mandate,
             key,
-            self.mandates.budget(mandate.id).remaining_minor,
+            remaining,
             now,
-            mandate_check=self.mandates.verify_mandate(mandate),
+            mandate_check=mandate_check,
             merchant_registered=registered,
             duplicate_of=duplicate_of,
-            semantic=self.semantic.check,
+            semantic=semantic,
         )
 
     def check(self, p: PurchaseProposal) -> GuardianDecision:
@@ -374,10 +402,19 @@ class GuardianService:
             dup = self._duplicate_of(conn, p, now)
         finally:
             conn.close()
-        return self._evaluate(p, mandate, now, dup).decision
+        return self._evaluate(
+            p, mandate, self.mandates.budget(mandate.id).remaining_minor,
+            self.mandates.verify_mandate(mandate), now, dup, self.semantic.check,
+        ).decision
+
+    def _payment_of(self, proposal_id: str):
+        return self.payments.get_for_proposal(proposal_id) if self.payments else None
+
+    def _result(self, decision: GuardianDecision, proposal_id: str) -> ProposalResult:
+        return ProposalResult(decision=decision, payment=self._payment_of(proposal_id))
 
     def submit(self, p: PurchaseProposal) -> ProposalResult:
-        mandate = self._mandate(p.mandate_id)  # unknown mandate: 404 before anything is written
+        self._mandate(p.mandate_id)  # unknown mandate: 404 before anything is written
         now = self.clock()
         body = canonical_json(p.model_dump(mode="json")).decode()
 
@@ -387,19 +424,19 @@ class GuardianService:
             if prior is not None:
                 if prior["body"] != body:
                     raise GawahError(
-                        409, "PROPOSAL_ID_CONFLICT", f"Proposal id {p.id!r} was already used for a different proposal"
+                        409,
+                        "PROPOSAL_ID_CONFLICT",
+                        f"Proposal id {p.id!r} was already used for a different proposal",
                     )
                 done = conn.execute(
                     "SELECT body FROM decisions WHERE proposal_id = ?", (p.id,)
                 ).fetchone()
-                if done is not None:  # idempotent replay: the earlier decision, unchanged
-                    return ProposalResult(
-                        decision=GuardianDecision.model_validate_json(done["body"]), payment=None
-                    )
+                if done is not None:  # idempotent replay: earlier decision (and payment)
+                    return self._result(GuardianDecision.model_validate_json(done["body"]), p.id)
             else:
                 conn.execute(
-                    "INSERT INTO proposals (id, mandate_id, merchant_id, cart_id, body, received_at)"
-                    " VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO proposals (id, mandate_id, merchant_id, cart_id, body,"
+                    " received_at) VALUES (?,?,?,?,?,?)",
                     (p.id, p.mandate_id, p.merchant_id, p.signed_cart.cart_id, body, format_ts(now)),
                 )
                 self.ledger.append_in(
@@ -416,40 +453,72 @@ class GuardianService:
                         "rationale": p.rationale[:500],
                     },
                 )
-            dup = self._duplicate_of(conn, p, now)
 
-        ev = self._evaluate(p, mandate, now, dup)
-        d = ev.decision
+        payment_id: str | None = None
+        with self._mandate_lock(p.mandate_id):
+            # Pass 1 (outside the DB write lock): may call the model; its answer is memoised.
+            memo: dict[str, SemanticResult] = {}
 
-        with write_tx(self.path) as conn:
-            done = conn.execute("SELECT body FROM decisions WHERE proposal_id = ?", (p.id,)).fetchone()
-            if done is not None:  # a concurrent request decided first; keep that one
-                return ProposalResult(
-                    decision=GuardianDecision.model_validate_json(done["body"]), payment=None
+            def semantic(m: Mandate, c: SignedCart) -> SemanticResult:
+                memo["r"] = self.semantic.check(m, c)
+                return memo["r"]
+
+            mandate = self._mandate(p.mandate_id)
+            conn = connect(self.path)
+            try:
+                dup = self._duplicate_of(conn, p, now)
+            finally:
+                conn.close()
+            self._evaluate(
+                p, mandate, self.mandates.budget(mandate.id).remaining_minor,
+                self.mandates.verify_mandate(mandate), now, dup, semantic,
+            )
+
+            def semantic_no_network(m: Mandate, c: SignedCart) -> SemanticResult:
+                return memo["r"] if "r" in memo else keyword_check(
+                    m.category, m.item_description, [(i.sku, i.title, i.variant) for i in c.line_items]
                 )
-            conn.execute(
-                "INSERT INTO decisions (id, proposal_id, body, advisories, decided_at)"
-                " VALUES (?,?,?,?,?)",
-                (d.id, p.id, d.model_dump_json(), json.dumps(ev.advisories), format_ts(now)),
-            )
-            self.ledger.append_in(
-                conn,
-                LedgerEntryType.DECISION_MADE,
-                d.id,
-                {
-                    "mandate_id": p.mandate_id,
-                    "proposal_id": p.id,
-                    "verdict": d.verdict.value,
-                    "reasons": [r.value for r in d.reasons],
-                    "explanation": d.explanation,
-                    "advisories": ev.advisories,
-                    "amount_minor": p.signed_cart.total_minor,
-                    "currency": p.signed_cart.currency,
-                    "semantic_source": ev.semantic.source if ev.semantic else None,
-                },
-            )
 
-        # TODO(payment): if d.verdict == ALLOW, reserve the budget (mandates.reserve with an
-        # idempotency key like f"idem-{p.id}"), then pay inside ledger.payment_attempt(...),
-        # commit or release the reservation, and return the PaymentRecord instead of None.
+            # Pass 2: authoritative. Fresh mandate status and budget, then reserve and write.
+            with write_tx(self.path) as conn:
+                done = conn.execute(
+                    "SELECT body FROM decisions WHERE proposal_id = ?", (p.id,)
+                ).fetchone()
+                if done is not None:  # a concurrent request for the same proposal decided first
+                    return self._result(GuardianDecision.model_validate_json(done["body"]), p.id)
+                mandate = self.mandates.get_in(conn, p.mandate_id)
+                ev = self._evaluate(
+                    p, mandate, self.mandates.budget_in(conn, mandate.id).remaining_minor,
+                    self.mandates.verify_in(conn, mandate), now,
+                    self._duplicate_of(conn, p, now), semantic_no_network,
+                )
+                d = ev.decision
+                conn.execute(
+                    "INSERT INTO decisions (id, proposal_id, body, advisories, decided_at)"
+                    " VALUES (?,?,?,?,?)",
+                    (d.id, p.id, d.model_dump_json(), json.dumps(ev.advisories), format_ts(now)),
+                )
+                self.ledger.append_in(
+                    conn,
+                    LedgerEntryType.DECISION_MADE,
+                    d.id,
+                    {
+                        "mandate_id": p.mandate_id,
+                        "proposal_id": p.id,
+                        "verdict": d.verdict.value,
+                        "reasons": [r.value for r in d.reasons],
+                        "explanation": d.explanation,
+                        "advisories": ev.advisories,
+                        "amount_minor": p.signed_cart.total_minor,
+                        "currency": p.signed_cart.currency,
+                        "semantic_source": ev.semantic.source if ev.semantic else None,
+                    },
+                )
+                if d.verdict == Verdict.ALLOW and self.payments is not None:
+                    # Reserve + payment row + PAYMENT_STARTED, committed with the decision.
+                    payment_id = self.payments.start_in(conn, p, d)
+
+        # Outside every lock and transaction: the only place PayPal is called.
+        if payment_id is not None and self.payments is not None:
+            return ProposalResult(decision=d, payment=self.payments.execute(payment_id))
         return ProposalResult(decision=d, payment=None)

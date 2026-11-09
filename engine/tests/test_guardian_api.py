@@ -19,7 +19,7 @@ def _iso(delta=timedelta(0)):
 
 
 @pytest.fixture
-def api(tmp_path, monkeypatch):
+def api(tmp_path, monkeypatch, use_fake_paypal):
     monkeypatch.setattr(settings, "gawah_mock", False)
     monkeypatch.setattr(settings, "system1_key", "real-key")
     monkeypatch.setattr(settings, "groq_api_key", "")
@@ -63,7 +63,8 @@ def test_allow_case(api):
     r = api.post("/v1/proposals", json=proposal(api), headers=H)
     assert r.status_code == 200
     res = ProposalResult.model_validate(r.json())
-    assert res.decision.verdict == "ALLOW" and res.decision.reasons == [] and res.payment is None
+    assert res.decision.verdict == "ALLOW" and res.decision.reasons == []
+    assert res.payment is not None and res.payment.status == "PAID"  # paid via the fake PayPal
 
 
 def test_over_budget_and_size_ten_cases(api):

@@ -96,6 +96,32 @@ MIGRATIONS: list[list[str]] = [
             created_at TEXT NOT NULL
         )""",
     ],
+    # 4: payments. One per proposal (UNIQUE), so a proposal can never be paid twice.
+    [
+        """CREATE TABLE payments (
+            id TEXT PRIMARY KEY,
+            proposal_id TEXT NOT NULL UNIQUE REFERENCES proposals(id),
+            decision_id TEXT NOT NULL,
+            mandate_id TEXT NOT NULL REFERENCES mandates(id),
+            paypal_order_id TEXT,
+            paypal_capture_id TEXT,
+            status TEXT NOT NULL CHECK (status IN ('RESERVED', 'PAID', 'FAILED', 'REFUNDED')),
+            amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+            currency TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            custom_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            paypal_status TEXT,
+            failure_reason TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            ledger_seq INTEGER,
+            refund_id TEXT
+        )""",
+        "CREATE INDEX payments_mandate ON payments(mandate_id)",
+        "CREATE INDEX payments_order ON payments(paypal_order_id)",
+        "CREATE INDEX payments_capture ON payments(paypal_capture_id)",
+    ],
 ]
 
 
