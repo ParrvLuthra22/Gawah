@@ -33,7 +33,7 @@ Shapes are identical to the mock; only behaviour differs. Mandates and the ledge
 - **Mandates**: `id` is `man_<12 hex>`; `issued_at` is set by the engine (UTC, whole seconds); `currency` is upper-cased; `expires_at` must have a timezone and be in the future, `max_amount_minor` > 0, `allowed_merchants` non-empty (422 otherwise). `signing_alg` is `ES256` and `key_id` looks like `gawah-mandate-key-1` (the mock fixtures say `ed25519`). The signature covers the immutable terms (id, user_id, category, item_description, max_amount_minor, currency, allowed_merchants, issued_at, expires_at), not `status`.
 - **Status**: a mandate past `expires_at` becomes `expired` the next time it is read. `POST /v1/mandates/{id}/revoke` is idempotent for an already-revoked mandate (200, no second ledger entry) and returns 409 `MANDATE_NOT_ACTIVE` for an expired one.
 - **Ledger**: creating a mandate appends `MANDATE_CREATED` and revoking appends `MANDATE_REVOKED` (`subject_id` and `data.mandate_id` are the mandate id), in the same transaction as the mandate change. `ts` has whole-second precision. `signature` is ES256 over the entry `hash`, with `key_id` naming the ledger key (`gawah-ledger-key-N`), so rotated keys still verify old entries. The database blocks UPDATE and DELETE on the ledger. `GET /v1/ledger` also accepts `type=` and `since_seq=` (also honoured in mock mode).
-- **`GET /v1/ledger/verify`** recomputes every hash, `prev_hash` link, sequence number and signature. The response is still `{ok, checked, first_broken_seq}`; the human-readable reason is not in the contract (it is available from the service and the tamper demo).
+- **`GET /v1/ledger/verify`** recomputes every hash, `prev_hash` link, sequence number and signature. The response is `{ok, checked, first_broken_seq, reason}`; `reason` is a human-readable string when `ok` is false, otherwise null.
 - Verifying a ledger by hand with `gawah_contract.hashing.verify_chain` still works on real entries; it checks hashes and links but not signatures.
 
 ## The 7 objects
@@ -60,7 +60,7 @@ All examples assume `H='X-Gawah-Key: yourkey'` and `B=http://localhost:8000`.
 | `GET /v1/payments`, `GET /v1/payments/{id}` | List / fetch |
 | `POST /v1/payments/{id}/refund` | Refund |
 | `GET /v1/ledger?mandate_id=&subject_id=` | Ledger entries |
-| `GET /v1/ledger/verify` | `{ok, checked, first_broken_seq}` |
+| `GET /v1/ledger/verify` | `{ok, checked, first_broken_seq, reason}` (`reason` is null when ok) |
 | `GET /v1/evidence/{payment_id}` | Full bundle for Dispute Counsel: mandate, proposal, signed cart, decision, payment, ledger entries, verification |
 | `POST /v1/merchants`, `GET /v1/merchants/{id}/public-key` | Register / fetch a store's public key (`MerchantKey`) |
 | `GET /health` | `{"status":"ok","service":"gawah"}` |

@@ -40,12 +40,13 @@ def list_ledger(
 def verify_ledger() -> LedgerVerifyResult:
     if not settings.gawah_mock:
         r = get_services().ledger.verify()
-        return LedgerVerifyResult(
-            ok=r["ok"], checked=r["checked"], first_broken_seq=r["first_broken_seq"]
-        )
+        return LedgerVerifyResult(**r)
     entries = [LedgerEntry.model_validate(e) for e in load("ledger_chain")]
     ok, first_broken = verify_chain(entries)
-    return LedgerVerifyResult(ok=ok, checked=len(entries), first_broken_seq=first_broken)
+    reason = None if ok else f"hash or prev_hash mismatch at seq {first_broken}"
+    return LedgerVerifyResult(
+        ok=ok, checked=len(entries), first_broken_seq=first_broken, reason=reason
+    )
 
 
 @router.get("/evidence/{payment_id}", response_model=EvidenceBundle, dependencies=[Depends(require_mock)])

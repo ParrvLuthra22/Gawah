@@ -157,6 +157,7 @@ class LedgerVerifyResult(_Model):
     ok: bool
     checked: int
     first_broken_seq: int | None = None
+    reason: str | None = Field(default=None, description="Why verification failed; null when ok")
 
 
 class EvidenceBundle(_Model):

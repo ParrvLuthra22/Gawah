@@ -95,7 +95,7 @@ def test_ledger_filters_and_verify():
     assert len(client.get("/v1/ledger?mandate_id=nope", headers=H3).json()) == 0
     assert len(client.get("/v1/ledger?subject_id=pay_01", headers=H3).json()) == 2
     assert client.get("/v1/ledger/verify", headers=H3).json() == {
-        "ok": True, "checked": 5, "first_broken_seq": None}
+        "ok": True, "checked": 5, "first_broken_seq": None, "reason": None}
 
 
 def test_evidence_bundles():

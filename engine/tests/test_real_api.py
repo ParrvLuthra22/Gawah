@@ -70,14 +70,15 @@ def test_verify_endpoint_ok_then_broken(api):
     api.post("/v1/mandates", json=body(), headers=H)
     r = api.get("/v1/ledger/verify", headers=H)
     assert LedgerVerifyResult.model_validate(r.json()) == LedgerVerifyResult(
-        ok=True, checked=2, first_broken_seq=None
+        ok=True, checked=2, first_broken_seq=None, reason=None
     )
     conn = sqlite3.connect(api.db_path, isolation_level=None)
     conn.execute("DROP TRIGGER ledger_no_update")
     conn.execute("""UPDATE ledger SET data = '{"mandate_id":"x"}' WHERE seq = 2""")
     conn.close()
-    assert api.get("/v1/ledger/verify", headers=H).json() == {
-        "ok": False, "checked": 2, "first_broken_seq": 2}
+    broken = api.get("/v1/ledger/verify", headers=H).json()
+    assert broken["ok"] is False and broken["checked"] == 2 and broken["first_broken_seq"] == 2
+    assert "hash mismatch" in broken["reason"]
 
 
 def test_errors_use_the_contract_envelope(api):
@@ -115,3 +116,16 @@ def test_mock_mode_never_touches_the_database(tmp_path, monkeypatch):
         assert client.get("/v1/mandates/man_01", headers=H).json()["id"] == "man_01"
         assert client.get("/v1/ledger/verify", headers=H).json()["checked"] == 5
     assert not (tmp_path / "never.db").exists()
+
+
+def test_mock_verify_reports_reason_for_a_broken_chain(monkeypatch):
+    from gawah_contract.fixtures import load
+    from gawah_engine.routers import ledger as ledger_router
+
+    chain = load("ledger_chain")
+    chain[2]["data"]["verdict"] = "BLOCK"  # edit after hashing
+    monkeypatch.setattr(settings, "gawah_mock", True)
+    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(ledger_router, "load", lambda name: chain)
+    r = TestClient(app).get("/v1/ledger/verify", headers=H).json()
+    assert r["ok"] is False and r["first_broken_seq"] == 3 and "seq 3" in r["reason"]

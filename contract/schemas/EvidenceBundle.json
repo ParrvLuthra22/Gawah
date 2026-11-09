@@ -137,6 +137,19 @@
         "ok": {
           "title": "Ok",
           "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why verification failed; null when ok",
+          "title": "Reason"
         }
       },
       "required": [
