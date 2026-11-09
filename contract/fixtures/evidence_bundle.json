@@ -1,0 +1,170 @@
+{
+  "mandate": {
+    "id": "man_01",
+    "user_id": "user_parrv",
+    "category": "footwear",
+    "item_description": "Black running shoes, size 9, under $80",
+    "max_amount_minor": 8000,
+    "currency": "USD",
+    "allowed_merchants": [
+      "demo-shoe-store"
+    ],
+    "issued_at": "2026-11-09T10:00:00Z",
+    "expires_at": "2026-11-16T10:00:00Z",
+    "status": "active",
+    "signature": "mock-signature-mandate-man_01",
+    "signing_alg": "ed25519",
+    "key_id": "gawah-ledger-key-1"
+  },
+  "proposal": {
+    "id": "prop_01",
+    "mandate_id": "man_01",
+    "agent_id": "shopper-agent-1",
+    "merchant_id": "demo-shoe-store",
+    "product": {
+      "id": "SHOE-BLK-RUN",
+      "title": "Black Runner",
+      "url": "https://demo-shoe-store.example/p/SHOE-BLK-RUN"
+    },
+    "quantity": 1,
+    "unit_price_minor": 6500,
+    "currency": "USD",
+    "rationale": "Black running shoes in size 9 for $65, under the $80 budget.",
+    "signed_cart": {
+      "cart_id": "cart_01",
+      "merchant_id": "demo-shoe-store",
+      "line_items": [
+        {
+          "sku": "SHOE-BLK-RUN",
+          "title": "Black Runner",
+          "variant": "size 9",
+          "quantity": 1,
+          "unit_price_minor": 6500
+        }
+      ],
+      "total_minor": 6500,
+      "currency": "USD",
+      "expires_at": "2026-11-09T11:00:00Z",
+      "signature": "mock-signature-cart_01",
+      "key_id": "demo-shoe-store-key-1"
+    },
+    "created_at": "2026-11-09T10:05:00Z"
+  },
+  "signed_cart": {
+    "cart_id": "cart_01",
+    "merchant_id": "demo-shoe-store",
+    "line_items": [
+      {
+        "sku": "SHOE-BLK-RUN",
+        "title": "Black Runner",
+        "variant": "size 9",
+        "quantity": 1,
+        "unit_price_minor": 6500
+      }
+    ],
+    "total_minor": 6500,
+    "currency": "USD",
+    "expires_at": "2026-11-09T11:00:00Z",
+    "signature": "mock-signature-cart_01",
+    "key_id": "demo-shoe-store-key-1"
+  },
+  "decision": {
+    "id": "dec_01",
+    "proposal_id": "prop_01",
+    "verdict": "ALLOW",
+    "reasons": [],
+    "explanation": "Within budget, merchant allowed, cart signature valid, mandate active.",
+    "checked_at": "2026-11-09T10:05:01Z"
+  },
+  "payment": {
+    "id": "pay_01",
+    "proposal_id": "prop_01",
+    "decision_id": "dec_01",
+    "paypal_order_id": "FAKEORDER5O1234567",
+    "paypal_capture_id": "FAKECAPTURE234567",
+    "status": "PAID",
+    "amount_minor": 6500,
+    "currency": "USD",
+    "idempotency_key": "idem-prop_01",
+    "custom_id": "gawah:prop_01",
+    "created_at": "2026-11-09T10:05:03Z"
+  },
+  "ledger_entries": [
+    {
+      "seq": 1,
+      "ts": "2026-11-09T10:00:00Z",
+      "type": "MANDATE_CREATED",
+      "subject_id": "man_01",
+      "data": {
+        "mandate_id": "man_01"
+      },
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "918e7067dd55678d8bbe1ba7eaa8ea264a6fa4c063d849f4c5d84d9564cf0d4f",
+      "signature": "mock-signature-ledger-1",
+      "key_id": "gawah-ledger-key-1"
+    },
+    {
+      "seq": 2,
+      "ts": "2026-11-09T10:05:00Z",
+      "type": "PROPOSAL_RECEIVED",
+      "subject_id": "prop_01",
+      "data": {
+        "mandate_id": "man_01",
+        "amount_minor": 6500
+      },
+      "prev_hash": "918e7067dd55678d8bbe1ba7eaa8ea264a6fa4c063d849f4c5d84d9564cf0d4f",
+      "hash": "295a653118a0362dcac01fa79d9ea2beadec5c40d0d6f277b50f708fcd23c44c",
+      "signature": "mock-signature-ledger-2",
+      "key_id": "gawah-ledger-key-1"
+    },
+    {
+      "seq": 3,
+      "ts": "2026-11-09T10:05:01Z",
+      "type": "DECISION_MADE",
+      "subject_id": "dec_01",
+      "data": {
+        "mandate_id": "man_01",
+        "proposal_id": "prop_01",
+        "verdict": "ALLOW"
+      },
+      "prev_hash": "295a653118a0362dcac01fa79d9ea2beadec5c40d0d6f277b50f708fcd23c44c",
+      "hash": "70ad8c915a53c59e52412f28587ea8a256b74bd799f89d6aaf6e7b50ee386ca8",
+      "signature": "mock-signature-ledger-3",
+      "key_id": "gawah-ledger-key-1"
+    },
+    {
+      "seq": 4,
+      "ts": "2026-11-09T10:05:02Z",
+      "type": "PAYMENT_STARTED",
+      "subject_id": "pay_01",
+      "data": {
+        "mandate_id": "man_01",
+        "custom_id": "gawah:prop_01"
+      },
+      "prev_hash": "70ad8c915a53c59e52412f28587ea8a256b74bd799f89d6aaf6e7b50ee386ca8",
+      "hash": "f13a721374ebe6d12a5a2ed70cc99a2c9ee9db8a4ac0d16b2150981fc9a04101",
+      "signature": "mock-signature-ledger-4",
+      "key_id": "gawah-ledger-key-1"
+    },
+    {
+      "seq": 5,
+      "ts": "2026-11-09T10:05:03Z",
+      "type": "PAYMENT_COMPLETED",
+      "subject_id": "pay_01",
+      "data": {
+        "mandate_id": "man_01",
+        "paypal_order_id": "FAKEORDER5O1234567",
+        "amount_minor": 6500
+      },
+      "prev_hash": "f13a721374ebe6d12a5a2ed70cc99a2c9ee9db8a4ac0d16b2150981fc9a04101",
+      "hash": "065fbce4e4507fb4add593fb2769df9360945f3285764e71eae2236df6ab0818",
+      "signature": "mock-signature-ledger-5",
+      "key_id": "gawah-ledger-key-1"
+    }
+  ],
+  "verification": {
+    "ok": true,
+    "checked": 5,
+    "first_broken_seq": null
+  }
+}

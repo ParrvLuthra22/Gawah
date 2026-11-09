@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "LineItem": {
+      "additionalProperties": false,
+      "properties": {
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit_price_minor": {
+          "minimum": 0,
+          "title": "Unit Price Minor",
+          "type": "integer"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Size or variant, e.g. 'size 9'",
+          "title": "Variant"
+        }
+      },
+      "required": [
+        "sku",
+        "title",
+        "quantity",
+        "unit_price_minor"
+      ],
+      "title": "LineItem",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "cart_id": {
+      "title": "Cart Id",
+      "type": "string"
+    },
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "key_id": {
+      "title": "Key Id",
+      "type": "string"
+    },
+    "line_items": {
+      "items": {
+        "$ref": "#/$defs/LineItem"
+      },
+      "title": "Line Items",
+      "type": "array"
+    },
+    "merchant_id": {
+      "title": "Merchant Id",
+      "type": "string"
+    },
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    },
+    "total_minor": {
+      "minimum": 0,
+      "title": "Total Minor",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "cart_id",
+    "merchant_id",
+    "line_items",
+    "total_minor",
+    "currency",
+    "expires_at",
+    "signature",
+    "key_id"
+  ],
+  "title": "SignedCart",
+  "type": "object"
+}

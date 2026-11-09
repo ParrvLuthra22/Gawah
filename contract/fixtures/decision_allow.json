@@ -1,0 +1,8 @@
+{
+  "id": "dec_01",
+  "proposal_id": "prop_01",
+  "verdict": "ALLOW",
+  "reasons": [],
+  "explanation": "Within budget, merchant allowed, cart signature valid, mandate active.",
+  "checked_at": "2026-11-09T10:05:01Z"
+}

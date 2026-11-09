@@ -1,0 +1,10 @@
+{
+  "id": "dec_03",
+  "proposal_id": "prop_03",
+  "verdict": "BLOCK",
+  "reasons": [
+    "MERCHANT_NOT_ALLOWED"
+  ],
+  "explanation": "Merchant shady-shoes is not in the mandate's allowed merchants.",
+  "checked_at": "2026-11-09T10:05:01Z"
+}

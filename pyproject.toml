@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv",
     "pytest",
     "ruff",
+    "gawah-contract",
 ]
 
 [build-system]
@@ -25,9 +26,15 @@ build-backend = "hatchling.build"
 packages = ["engine/gawah_engine"]
 
 [tool.pytest.ini_options]
-testpaths = ["engine/tests"]
+testpaths = ["engine/tests", "contract/tests"]
 pythonpath = ["engine"]
 
 [tool.ruff]
 line-length = 100
 extend-exclude = ["web"]
+
+[tool.uv.workspace]
+members = ["contract"]
+
+[tool.uv.sources]
+gawah-contract = { workspace = true }

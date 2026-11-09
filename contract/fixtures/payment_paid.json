@@ -1,0 +1,13 @@
+{
+  "id": "pay_01",
+  "proposal_id": "prop_01",
+  "decision_id": "dec_01",
+  "paypal_order_id": "FAKEORDER5O1234567",
+  "paypal_capture_id": "FAKECAPTURE234567",
+  "status": "PAID",
+  "amount_minor": 6500,
+  "currency": "USD",
+  "idempotency_key": "idem-prop_01",
+  "custom_id": "gawah:prop_01",
+  "created_at": "2026-11-09T10:05:03Z"
+}

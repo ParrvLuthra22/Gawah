@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "LedgerEntryType": {
+      "enum": [
+        "MANDATE_CREATED",
+        "MANDATE_REVOKED",
+        "PROPOSAL_RECEIVED",
+        "DECISION_MADE",
+        "PAYMENT_STARTED",
+        "PAYMENT_COMPLETED",
+        "PAYMENT_FAILED",
+        "DISPUTE_RECEIVED",
+        "EVIDENCE_SENT",
+        "CLAIM_ACCEPTED",
+        "REFUNDED"
+      ],
+      "title": "LedgerEntryType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "data": {
+      "additionalProperties": true,
+      "title": "Data",
+      "type": "object"
+    },
+    "hash": {
+      "title": "Hash",
+      "type": "string"
+    },
+    "key_id": {
+      "title": "Key Id",
+      "type": "string"
+    },
+    "prev_hash": {
+      "title": "Prev Hash",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 1,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    },
+    "subject_id": {
+      "title": "Subject Id",
+      "type": "string"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/LedgerEntryType"
+    }
+  },
+  "required": [
+    "seq",
+    "ts",
+    "type",
+    "subject_id",
+    "data",
+    "prev_hash",
+    "hash",
+    "signature",
+    "key_id"
+  ],
+  "title": "LedgerEntry",
+  "type": "object"
+}

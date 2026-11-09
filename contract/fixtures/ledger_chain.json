@@ -1,0 +1,73 @@
+[
+  {
+    "seq": 1,
+    "ts": "2026-11-09T10:00:00Z",
+    "type": "MANDATE_CREATED",
+    "subject_id": "man_01",
+    "data": {
+      "mandate_id": "man_01"
+    },
+    "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hash": "918e7067dd55678d8bbe1ba7eaa8ea264a6fa4c063d849f4c5d84d9564cf0d4f",
+    "signature": "mock-signature-ledger-1",
+    "key_id": "gawah-ledger-key-1"
+  },
+  {
+    "seq": 2,
+    "ts": "2026-11-09T10:05:00Z",
+    "type": "PROPOSAL_RECEIVED",
+    "subject_id": "prop_01",
+    "data": {
+      "mandate_id": "man_01",
+      "amount_minor": 6500
+    },
+    "prev_hash": "918e7067dd55678d8bbe1ba7eaa8ea264a6fa4c063d849f4c5d84d9564cf0d4f",
+    "hash": "295a653118a0362dcac01fa79d9ea2beadec5c40d0d6f277b50f708fcd23c44c",
+    "signature": "mock-signature-ledger-2",
+    "key_id": "gawah-ledger-key-1"
+  },
+  {
+    "seq": 3,
+    "ts": "2026-11-09T10:05:01Z",
+    "type": "DECISION_MADE",
+    "subject_id": "dec_01",
+    "data": {
+      "mandate_id": "man_01",
+      "proposal_id": "prop_01",
+      "verdict": "ALLOW"
+    },
+    "prev_hash": "295a653118a0362dcac01fa79d9ea2beadec5c40d0d6f277b50f708fcd23c44c",
+    "hash": "70ad8c915a53c59e52412f28587ea8a256b74bd799f89d6aaf6e7b50ee386ca8",
+    "signature": "mock-signature-ledger-3",
+    "key_id": "gawah-ledger-key-1"
+  },
+  {
+    "seq": 4,
+    "ts": "2026-11-09T10:05:02Z",
+    "type": "PAYMENT_STARTED",
+    "subject_id": "pay_01",
+    "data": {
+      "mandate_id": "man_01",
+      "custom_id": "gawah:prop_01"
+    },
+    "prev_hash": "70ad8c915a53c59e52412f28587ea8a256b74bd799f89d6aaf6e7b50ee386ca8",
+    "hash": "f13a721374ebe6d12a5a2ed70cc99a2c9ee9db8a4ac0d16b2150981fc9a04101",
+    "signature": "mock-signature-ledger-4",
+    "key_id": "gawah-ledger-key-1"
+  },
+  {
+    "seq": 5,
+    "ts": "2026-11-09T10:05:03Z",
+    "type": "PAYMENT_COMPLETED",
+    "subject_id": "pay_01",
+    "data": {
+      "mandate_id": "man_01",
+      "paypal_order_id": "FAKEORDER5O1234567",
+      "amount_minor": 6500
+    },
+    "prev_hash": "f13a721374ebe6d12a5a2ed70cc99a2c9ee9db8a4ac0d16b2150981fc9a04101",
+    "hash": "065fbce4e4507fb4add593fb2769df9360945f3285764e71eae2236df6ab0818",
+    "signature": "mock-signature-ledger-5",
+    "key_id": "gawah-ledger-key-1"
+  }
+]

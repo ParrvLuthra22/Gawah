@@ -1,0 +1,10 @@
+{
+  "id": "dec_02",
+  "proposal_id": "prop_02",
+  "verdict": "BLOCK",
+  "reasons": [
+    "OVER_BUDGET"
+  ],
+  "explanation": "Cart total $120.00 exceeds the mandate cap of $80.00.",
+  "checked_at": "2026-11-09T10:05:01Z"
+}

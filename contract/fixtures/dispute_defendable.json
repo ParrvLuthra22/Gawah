@@ -1,0 +1,11 @@
+{
+  "id": "dsp_01",
+  "paypal_dispute_id": "PP-D-FAKE-1001",
+  "payment_id": "pay_01",
+  "status": "OPEN",
+  "reason": "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
+  "amount_minor": 6500,
+  "currency": "USD",
+  "opened_at": "2026-11-12T09:00:00Z",
+  "source": "simulated"
+}

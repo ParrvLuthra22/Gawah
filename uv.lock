@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 
+[manifest]
+members = [
+    "gawah",
+    "gawah-contract",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -251,6 +257,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "gawah-contract" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -264,6 +271,7 @@ dependencies = [
 requires-dist = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "gawah-contract", editable = "contract" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -272,6 +280,17 @@ requires-dist = [
     { name = "ruff" },
     { name = "uvicorn", extras = ["standard"] },
 ]
+
+[[package]]
+name = "gawah-contract"
+version = "0.1.0"
+source = { editable = "contract" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
 name = "h11"

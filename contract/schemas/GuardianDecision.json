@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "ReasonCode": {
+      "enum": [
+        "OVER_BUDGET",
+        "MERCHANT_NOT_ALLOWED",
+        "CART_SIGNATURE_INVALID",
+        "MANDATE_EXPIRED",
+        "MANDATE_REVOKED",
+        "CURRENCY_MISMATCH",
+        "CATEGORY_MISMATCH",
+        "DUPLICATE",
+        "PRICE_MISMATCH"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "Verdict": {
+      "enum": [
+        "ALLOW",
+        "BLOCK"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "explanation": {
+      "title": "Explanation",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "proposal_id": {
+      "title": "Proposal Id",
+      "type": "string"
+    },
+    "reasons": {
+      "items": {
+        "$ref": "#/$defs/ReasonCode"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "verdict": {
+      "$ref": "#/$defs/Verdict"
+    }
+  },
+  "required": [
+    "id",
+    "proposal_id",
+    "verdict",
+    "reasons",
+    "explanation",
+    "checked_at"
+  ],
+  "title": "GuardianDecision",
+  "type": "object"
+}

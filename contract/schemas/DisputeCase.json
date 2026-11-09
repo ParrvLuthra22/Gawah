@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "DisputeSource": {
+      "enum": [
+        "paypal_sandbox",
+        "simulated"
+      ],
+      "title": "DisputeSource",
+      "type": "string"
+    },
+    "DisputeStatus": {
+      "enum": [
+        "OPEN",
+        "EVIDENCE_SUBMITTED",
+        "ACCEPTED",
+        "WON",
+        "LOST"
+      ],
+      "title": "DisputeStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "amount_minor": {
+      "minimum": 0,
+      "title": "Amount Minor",
+      "type": "integer"
+    },
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "opened_at": {
+      "format": "date-time",
+      "title": "Opened At",
+      "type": "string"
+    },
+    "payment_id": {
+      "title": "Payment Id",
+      "type": "string"
+    },
+    "paypal_dispute_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Paypal Dispute Id"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/DisputeSource"
+    },
+    "status": {
+      "$ref": "#/$defs/DisputeStatus"
+    }
+  },
+  "required": [
+    "id",
+    "paypal_dispute_id",
+    "payment_id",
+    "status",
+    "reason",
+    "amount_minor",
+    "currency",
+    "opened_at",
+    "source"
+  ],
+  "title": "DisputeCase",
+  "type": "object"
+}

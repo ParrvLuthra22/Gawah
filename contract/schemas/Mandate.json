@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "MandateStatus": {
+      "enum": [
+        "active",
+        "revoked",
+        "expired"
+      ],
+      "title": "MandateStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "allowed_merchants": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Merchants",
+      "type": "array"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "issued_at": {
+      "format": "date-time",
+      "title": "Issued At",
+      "type": "string"
+    },
+    "item_description": {
+      "title": "Item Description",
+      "type": "string"
+    },
+    "key_id": {
+      "title": "Key Id",
+      "type": "string"
+    },
+    "max_amount_minor": {
+      "description": "Spending cap in minor units",
+      "minimum": 0,
+      "title": "Max Amount Minor",
+      "type": "integer"
+    },
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    },
+    "signing_alg": {
+      "title": "Signing Alg",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/MandateStatus"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "user_id",
+    "category",
+    "item_description",
+    "max_amount_minor",
+    "currency",
+    "allowed_merchants",
+    "issued_at",
+    "expires_at",
+    "status",
+    "signature",
+    "signing_alg",
+    "key_id"
+  ],
+  "title": "Mandate",
+  "type": "object"
+}

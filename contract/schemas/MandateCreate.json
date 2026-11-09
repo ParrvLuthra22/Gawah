@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "description": "Body of POST /v1/mandates. The engine assigns id, timestamps and signature.",
+  "properties": {
+    "allowed_merchants": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Merchants",
+      "type": "array"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "item_description": {
+      "title": "Item Description",
+      "type": "string"
+    },
+    "max_amount_minor": {
+      "minimum": 0,
+      "title": "Max Amount Minor",
+      "type": "integer"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "category",
+    "item_description",
+    "max_amount_minor",
+    "currency",
+    "allowed_merchants",
+    "expires_at"
+  ],
+  "title": "MandateCreate",
+  "type": "object"
+}

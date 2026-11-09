@@ -1,0 +1,60 @@
+"""Shared enums. Values are the strings that appear on the wire."""
+
+from enum import StrEnum
+
+
+class MandateStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+class Verdict(StrEnum):
+    ALLOW = "ALLOW"
+    BLOCK = "BLOCK"
+
+
+class ReasonCode(StrEnum):
+    OVER_BUDGET = "OVER_BUDGET"
+    MERCHANT_NOT_ALLOWED = "MERCHANT_NOT_ALLOWED"
+    CART_SIGNATURE_INVALID = "CART_SIGNATURE_INVALID"
+    MANDATE_EXPIRED = "MANDATE_EXPIRED"
+    MANDATE_REVOKED = "MANDATE_REVOKED"
+    CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
+    CATEGORY_MISMATCH = "CATEGORY_MISMATCH"
+    DUPLICATE = "DUPLICATE"
+    PRICE_MISMATCH = "PRICE_MISMATCH"
+
+
+class PaymentStatus(StrEnum):
+    RESERVED = "RESERVED"
+    PAID = "PAID"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
+
+
+class LedgerEntryType(StrEnum):
+    MANDATE_CREATED = "MANDATE_CREATED"
+    MANDATE_REVOKED = "MANDATE_REVOKED"
+    PROPOSAL_RECEIVED = "PROPOSAL_RECEIVED"
+    DECISION_MADE = "DECISION_MADE"
+    PAYMENT_STARTED = "PAYMENT_STARTED"
+    PAYMENT_COMPLETED = "PAYMENT_COMPLETED"
+    PAYMENT_FAILED = "PAYMENT_FAILED"
+    DISPUTE_RECEIVED = "DISPUTE_RECEIVED"
+    EVIDENCE_SENT = "EVIDENCE_SENT"
+    CLAIM_ACCEPTED = "CLAIM_ACCEPTED"
+    REFUNDED = "REFUNDED"
+
+
+class DisputeSource(StrEnum):
+    PAYPAL_SANDBOX = "paypal_sandbox"
+    SIMULATED = "simulated"
+
+
+class DisputeStatus(StrEnum):
+    OPEN = "OPEN"
+    EVIDENCE_SUBMITTED = "EVIDENCE_SUBMITTED"
+    ACCEPTED = "ACCEPTED"
+    WON = "WON"
+    LOST = "LOST"

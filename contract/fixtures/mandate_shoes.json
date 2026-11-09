@@ -1,0 +1,17 @@
+{
+  "id": "man_01",
+  "user_id": "user_parrv",
+  "category": "footwear",
+  "item_description": "Black running shoes, size 9, under $80",
+  "max_amount_minor": 8000,
+  "currency": "USD",
+  "allowed_merchants": [
+    "demo-shoe-store"
+  ],
+  "issued_at": "2026-11-09T10:00:00Z",
+  "expires_at": "2026-11-16T10:00:00Z",
+  "status": "active",
+  "signature": "mock-signature-mandate-man_01",
+  "signing_alg": "ed25519",
+  "key_id": "gawah-ledger-key-1"
+}

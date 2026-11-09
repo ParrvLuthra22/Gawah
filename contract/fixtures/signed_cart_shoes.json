@@ -1,0 +1,18 @@
+{
+  "cart_id": "cart_01",
+  "merchant_id": "demo-shoe-store",
+  "line_items": [
+    {
+      "sku": "SHOE-BLK-RUN",
+      "title": "Black Runner",
+      "variant": "size 9",
+      "quantity": 1,
+      "unit_price_minor": 6500
+    }
+  ],
+  "total_minor": 6500,
+  "currency": "USD",
+  "expires_at": "2026-11-09T11:00:00Z",
+  "signature": "mock-signature-cart_01",
+  "key_id": "demo-shoe-store-key-1"
+}

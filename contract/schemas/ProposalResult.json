@@ -1,0 +1,183 @@
+{
+  "$defs": {
+    "GuardianDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/ReasonCode"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "proposal_id",
+        "verdict",
+        "reasons",
+        "explanation",
+        "checked_at"
+      ],
+      "title": "GuardianDecision",
+      "type": "object"
+    },
+    "PaymentRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_minor": {
+          "minimum": 0,
+          "title": "Amount Minor",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "title": "Currency",
+          "type": "string"
+        },
+        "custom_id": {
+          "description": "Ledger reference attached to the PayPal order",
+          "title": "Custom Id",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "paypal_capture_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paypal Capture Id"
+        },
+        "paypal_order_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paypal Order Id"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/PaymentStatus"
+        }
+      },
+      "required": [
+        "id",
+        "proposal_id",
+        "decision_id",
+        "paypal_order_id",
+        "paypal_capture_id",
+        "status",
+        "amount_minor",
+        "currency",
+        "idempotency_key",
+        "custom_id",
+        "created_at"
+      ],
+      "title": "PaymentRecord",
+      "type": "object"
+    },
+    "PaymentStatus": {
+      "enum": [
+        "RESERVED",
+        "PAID",
+        "FAILED",
+        "REFUNDED"
+      ],
+      "title": "PaymentStatus",
+      "type": "string"
+    },
+    "ReasonCode": {
+      "enum": [
+        "OVER_BUDGET",
+        "MERCHANT_NOT_ALLOWED",
+        "CART_SIGNATURE_INVALID",
+        "MANDATE_EXPIRED",
+        "MANDATE_REVOKED",
+        "CURRENCY_MISMATCH",
+        "CATEGORY_MISMATCH",
+        "DUPLICATE",
+        "PRICE_MISMATCH"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "Verdict": {
+      "enum": [
+        "ALLOW",
+        "BLOCK"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "$ref": "#/$defs/GuardianDecision"
+    },
+    "payment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PaymentRecord"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "decision",
+    "payment"
+  ],
+  "title": "ProposalResult",
+  "type": "object"
+}

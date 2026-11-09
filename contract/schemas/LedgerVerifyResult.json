@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "checked": {
+      "title": "Checked",
+      "type": "integer"
+    },
+    "first_broken_seq": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "First Broken Seq"
+    },
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok",
+    "checked"
+  ],
+  "title": "LedgerVerifyResult",
+  "type": "object"
+}

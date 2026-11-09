@@ -1,0 +1,586 @@
+{
+  "$defs": {
+    "GuardianDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/ReasonCode"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "proposal_id",
+        "verdict",
+        "reasons",
+        "explanation",
+        "checked_at"
+      ],
+      "title": "GuardianDecision",
+      "type": "object"
+    },
+    "LedgerEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "hash": {
+          "title": "Hash",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        },
+        "prev_hash": {
+          "title": "Prev Hash",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 1,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        },
+        "subject_id": {
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/LedgerEntryType"
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "type",
+        "subject_id",
+        "data",
+        "prev_hash",
+        "hash",
+        "signature",
+        "key_id"
+      ],
+      "title": "LedgerEntry",
+      "type": "object"
+    },
+    "LedgerEntryType": {
+      "enum": [
+        "MANDATE_CREATED",
+        "MANDATE_REVOKED",
+        "PROPOSAL_RECEIVED",
+        "DECISION_MADE",
+        "PAYMENT_STARTED",
+        "PAYMENT_COMPLETED",
+        "PAYMENT_FAILED",
+        "DISPUTE_RECEIVED",
+        "EVIDENCE_SENT",
+        "CLAIM_ACCEPTED",
+        "REFUNDED"
+      ],
+      "title": "LedgerEntryType",
+      "type": "string"
+    },
+    "LedgerVerifyResult": {
+      "additionalProperties": false,
+      "properties": {
+        "checked": {
+          "title": "Checked",
+          "type": "integer"
+        },
+        "first_broken_seq": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Broken Seq"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "checked"
+      ],
+      "title": "LedgerVerifyResult",
+      "type": "object"
+    },
+    "LineItem": {
+      "additionalProperties": false,
+      "properties": {
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit_price_minor": {
+          "minimum": 0,
+          "title": "Unit Price Minor",
+          "type": "integer"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Size or variant, e.g. 'size 9'",
+          "title": "Variant"
+        }
+      },
+      "required": [
+        "sku",
+        "title",
+        "quantity",
+        "unit_price_minor"
+      ],
+      "title": "LineItem",
+      "type": "object"
+    },
+    "Mandate": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_merchants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Merchants",
+          "type": "array"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "title": "Currency",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "title": "Issued At",
+          "type": "string"
+        },
+        "item_description": {
+          "title": "Item Description",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        },
+        "max_amount_minor": {
+          "description": "Spending cap in minor units",
+          "minimum": 0,
+          "title": "Max Amount Minor",
+          "type": "integer"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        },
+        "signing_alg": {
+          "title": "Signing Alg",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/MandateStatus"
+        },
+        "user_id": {
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "category",
+        "item_description",
+        "max_amount_minor",
+        "currency",
+        "allowed_merchants",
+        "issued_at",
+        "expires_at",
+        "status",
+        "signature",
+        "signing_alg",
+        "key_id"
+      ],
+      "title": "Mandate",
+      "type": "object"
+    },
+    "MandateStatus": {
+      "enum": [
+        "active",
+        "revoked",
+        "expired"
+      ],
+      "title": "MandateStatus",
+      "type": "string"
+    },
+    "PaymentRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "amount_minor": {
+          "minimum": 0,
+          "title": "Amount Minor",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "title": "Currency",
+          "type": "string"
+        },
+        "custom_id": {
+          "description": "Ledger reference attached to the PayPal order",
+          "title": "Custom Id",
+          "type": "string"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "paypal_capture_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paypal Capture Id"
+        },
+        "paypal_order_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paypal Order Id"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/PaymentStatus"
+        }
+      },
+      "required": [
+        "id",
+        "proposal_id",
+        "decision_id",
+        "paypal_order_id",
+        "paypal_capture_id",
+        "status",
+        "amount_minor",
+        "currency",
+        "idempotency_key",
+        "custom_id",
+        "created_at"
+      ],
+      "title": "PaymentRecord",
+      "type": "object"
+    },
+    "PaymentStatus": {
+      "enum": [
+        "RESERVED",
+        "PAID",
+        "FAILED",
+        "REFUNDED"
+      ],
+      "title": "PaymentStatus",
+      "type": "string"
+    },
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "url"
+      ],
+      "title": "Product",
+      "type": "object"
+    },
+    "PurchaseProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "title": "Currency",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "mandate_id": {
+          "title": "Mandate Id",
+          "type": "string"
+        },
+        "merchant_id": {
+          "title": "Merchant Id",
+          "type": "string"
+        },
+        "product": {
+          "$ref": "#/$defs/Product"
+        },
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "signed_cart": {
+          "$ref": "#/$defs/SignedCart"
+        },
+        "unit_price_minor": {
+          "minimum": 0,
+          "title": "Unit Price Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "mandate_id",
+        "agent_id",
+        "merchant_id",
+        "product",
+        "quantity",
+        "unit_price_minor",
+        "currency",
+        "rationale",
+        "signed_cart",
+        "created_at"
+      ],
+      "title": "PurchaseProposal",
+      "type": "object"
+    },
+    "ReasonCode": {
+      "enum": [
+        "OVER_BUDGET",
+        "MERCHANT_NOT_ALLOWED",
+        "CART_SIGNATURE_INVALID",
+        "MANDATE_EXPIRED",
+        "MANDATE_REVOKED",
+        "CURRENCY_MISMATCH",
+        "CATEGORY_MISMATCH",
+        "DUPLICATE",
+        "PRICE_MISMATCH"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "SignedCart": {
+      "additionalProperties": false,
+      "properties": {
+        "cart_id": {
+          "title": "Cart Id",
+          "type": "string"
+        },
+        "currency": {
+          "maxLength": 3,
+          "minLength": 3,
+          "title": "Currency",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "key_id": {
+          "title": "Key Id",
+          "type": "string"
+        },
+        "line_items": {
+          "items": {
+            "$ref": "#/$defs/LineItem"
+          },
+          "title": "Line Items",
+          "type": "array"
+        },
+        "merchant_id": {
+          "title": "Merchant Id",
+          "type": "string"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        },
+        "total_minor": {
+          "minimum": 0,
+          "title": "Total Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cart_id",
+        "merchant_id",
+        "line_items",
+        "total_minor",
+        "currency",
+        "expires_at",
+        "signature",
+        "key_id"
+      ],
+      "title": "SignedCart",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "ALLOW",
+        "BLOCK"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "$ref": "#/$defs/GuardianDecision"
+    },
+    "ledger_entries": {
+      "items": {
+        "$ref": "#/$defs/LedgerEntry"
+      },
+      "title": "Ledger Entries",
+      "type": "array"
+    },
+    "mandate": {
+      "$ref": "#/$defs/Mandate"
+    },
+    "payment": {
+      "$ref": "#/$defs/PaymentRecord"
+    },
+    "proposal": {
+      "$ref": "#/$defs/PurchaseProposal"
+    },
+    "signed_cart": {
+      "$ref": "#/$defs/SignedCart"
+    },
+    "verification": {
+      "$ref": "#/$defs/LedgerVerifyResult"
+    }
+  },
+  "required": [
+    "mandate",
+    "proposal",
+    "signed_cart",
+    "decision",
+    "payment",
+    "ledger_entries",
+    "verification"
+  ],
+  "title": "EvidenceBundle",
+  "type": "object"
+}

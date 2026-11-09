@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alg": {
+      "default": "ed25519",
+      "title": "Alg",
+      "type": "string"
+    },
+    "key_id": {
+      "title": "Key Id",
+      "type": "string"
+    },
+    "merchant_id": {
+      "title": "Merchant Id",
+      "type": "string"
+    },
+    "public_key_pem": {
+      "title": "Public Key Pem",
+      "type": "string"
+    }
+  },
+  "required": [
+    "merchant_id",
+    "key_id",
+    "public_key_pem"
+  ],
+  "title": "MerchantKey",
+  "type": "object"
+}

@@ -15,3 +15,7 @@ test:
 
 lint:
 	uv run ruff check .
+
+.PHONY: contract
+contract:
+	uv run python -m gawah_contract.export

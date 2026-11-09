@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "PaymentStatus": {
+      "enum": [
+        "RESERVED",
+        "PAID",
+        "FAILED",
+        "REFUNDED"
+      ],
+      "title": "PaymentStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "amount_minor": {
+      "minimum": 0,
+      "title": "Amount Minor",
+      "type": "integer"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "custom_id": {
+      "description": "Ledger reference attached to the PayPal order",
+      "title": "Custom Id",
+      "type": "string"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "paypal_capture_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Paypal Capture Id"
+    },
+    "paypal_order_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Paypal Order Id"
+    },
+    "proposal_id": {
+      "title": "Proposal Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/PaymentStatus"
+    }
+  },
+  "required": [
+    "id",
+    "proposal_id",
+    "decision_id",
+    "paypal_order_id",
+    "paypal_capture_id",
+    "status",
+    "amount_minor",
+    "currency",
+    "idempotency_key",
+    "custom_id",
+    "created_at"
+  ],
+  "title": "PaymentRecord",
+  "type": "object"
+}
