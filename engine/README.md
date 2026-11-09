@@ -1,3 +1,3 @@
 # engine
 
-Python package `gawah_engine`: mandate, guardian, ledger, counsel, and the PayPal adapter.
+Python package `gawah_engine` (System 2, owner: Parrv). Port 8000: mandate, guardian, ledger, payments, PayPal adapter.
