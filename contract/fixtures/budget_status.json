@@ -1,0 +1,8 @@
+{
+  "mandate_id": "man_01",
+  "max_amount_minor": 8000,
+  "spent_minor": 6500,
+  "reserved_minor": 0,
+  "remaining_minor": 1500,
+  "currency": "USD"
+}

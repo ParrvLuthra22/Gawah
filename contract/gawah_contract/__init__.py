@@ -8,6 +8,7 @@ from .enums import (
     Verdict,
 )
 from .models import (
+    BudgetStatus,
     DisputeCase,
     ErrorBody,
     ErrorResponse,
@@ -28,6 +29,7 @@ from .models import (
 )
 
 __all__ = [
+    "BudgetStatus",
     "DisputeCase",
     "DisputeSource",
     "DisputeStatus",

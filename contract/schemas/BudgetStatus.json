@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "description": "Body of GET /v1/mandates/{id}/budget. remaining = max - spent - reserved.",
+  "properties": {
+    "currency": {
+      "maxLength": 3,
+      "minLength": 3,
+      "title": "Currency",
+      "type": "string"
+    },
+    "mandate_id": {
+      "title": "Mandate Id",
+      "type": "string"
+    },
+    "max_amount_minor": {
+      "minimum": 0,
+      "title": "Max Amount Minor",
+      "type": "integer"
+    },
+    "remaining_minor": {
+      "minimum": 0,
+      "title": "Remaining Minor",
+      "type": "integer"
+    },
+    "reserved_minor": {
+      "minimum": 0,
+      "title": "Reserved Minor",
+      "type": "integer"
+    },
+    "spent_minor": {
+      "minimum": 0,
+      "title": "Spent Minor",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "mandate_id",
+    "max_amount_minor",
+    "spent_minor",
+    "reserved_minor",
+    "remaining_minor",
+    "currency"
+  ],
+  "title": "BudgetStatus",
+  "type": "object"
+}

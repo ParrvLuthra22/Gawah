@@ -48,6 +48,17 @@ class MandateCreate(_Model):
     expires_at: datetime
 
 
+class BudgetStatus(_Model):
+    """Body of GET /v1/mandates/{id}/budget. remaining = max - spent - reserved."""
+
+    mandate_id: str
+    max_amount_minor: int = Field(ge=0)
+    spent_minor: int = Field(ge=0)
+    reserved_minor: int = Field(ge=0)
+    remaining_minor: int = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3)
+
+
 class Product(_Model):
     id: str
     title: str

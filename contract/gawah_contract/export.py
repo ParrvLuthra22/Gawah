@@ -11,6 +11,7 @@ SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "schemas"
 EXPORTED = [
     "Mandate",
     "MandateCreate",
+    "BudgetStatus",
     "PurchaseProposal",
     "SignedCart",
     "GuardianDecision",

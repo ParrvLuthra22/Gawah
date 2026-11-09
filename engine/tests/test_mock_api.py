@@ -118,3 +118,11 @@ def test_non_mock_mode_returns_501(monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", False)
     r = client.get("/v1/payments", headers=H1)
     assert r.status_code == 501
+
+
+def test_mock_budget():
+    r = client.get("/v1/mandates/man_01/budget", headers=H3)
+    assert r.status_code == 200
+    assert r.json() == {"mandate_id": "man_01", "max_amount_minor": 8000, "spent_minor": 6500,
+                        "reserved_minor": 0, "remaining_minor": 1500, "currency": "USD"}
+    assert client.get("/v1/mandates/nope/budget", headers=H3).status_code == 404

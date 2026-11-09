@@ -129,3 +129,19 @@ def test_mock_verify_reports_reason_for_a_broken_chain(monkeypatch):
     monkeypatch.setattr(ledger_router, "load", lambda name: chain)
     r = TestClient(app).get("/v1/ledger/verify", headers=H).json()
     assert r["ok"] is False and r["first_broken_seq"] == 3 and "seq 3" in r["reason"]
+
+
+def test_budget_endpoint_tracks_reservations(api):
+    from gawah_engine.services import get_services
+
+    m = api.post("/v1/mandates", json=body(), headers=H).json()
+    assert api.get(f"/v1/mandates/{m['id']}/budget", headers=H).json() == {
+        "mandate_id": m["id"], "max_amount_minor": 8000, "spent_minor": 0,
+        "reserved_minor": 0, "remaining_minor": 8000, "currency": "USD"}
+    mandates = get_services().mandates
+    mandates.reserve(m["id"], 3000, "k1")
+    mandates.reserve(m["id"], 1000, "k2")
+    mandates.commit(m["id"], "k2")
+    b = api.get(f"/v1/mandates/{m['id']}/budget", headers=H).json()
+    assert (b["spent_minor"], b["reserved_minor"], b["remaining_minor"]) == (1000, 3000, 4000)
+    assert api.get("/v1/mandates/man_nope/budget", headers=H).status_code == 404

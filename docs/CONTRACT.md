@@ -55,6 +55,7 @@ All examples assume `H='X-Gawah-Key: yourkey'` and `B=http://localhost:8000`.
 | `POST /v1/mandates` | Create and sign a mandate (body `MandateCreate`) |
 | `GET /v1/mandates`, `GET /v1/mandates/{id}` | List / fetch |
 | `POST /v1/mandates/{id}/revoke` | Revoke |
+| `GET /v1/mandates/{id}/budget` | `BudgetStatus`: `{mandate_id, max_amount_minor, spent_minor, reserved_minor, remaining_minor, currency}`; remaining = max - spent - reserved |
 | `POST /v1/proposals` | Guardian, then payment, then ledger. Returns `{decision, payment or null}` |
 | `POST /v1/guardian/check` | Dry run: decision only, no payment, no ledger write |
 | `GET /v1/payments`, `GET /v1/payments/{id}` | List / fetch |
