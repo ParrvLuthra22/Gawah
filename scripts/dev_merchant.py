@@ -76,7 +76,7 @@ def main() -> int:
         import httpx
         from gawah_engine.config import settings
 
-        service_key = settings.system1_key or settings.system3_key
+        service_key = settings.system1_key  # merchants are registered with the System 1 key
         r = httpx.post(
             f"{args.url.rstrip('/')}/v1/merchants",
             json=body.model_dump(),
@@ -88,7 +88,7 @@ def main() -> int:
         from gawah_engine.config import settings
         from gawah_engine.services import get_services
 
-        get_services().merchants.register(body)
+        get_services().merchants.register(body, allow_rotation=True)  # operator path
         print(f"database: {settings.database_url}")
     print(f"registered {MERCHANT_ID} key {KEY_ID} (private key stays in {args.key_dir}/)")
     return 0

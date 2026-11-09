@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 
 from gawah_engine.config import settings
-from gawah_engine.semantic import SemanticChecker
+from gawah_engine.semantic import SemanticChecker, model_list
 
 CASES = [
     ("matching item", [("SHOE-BLK-RUN", "Black Runner", "size 9")]),
@@ -25,16 +25,17 @@ def main() -> int:
         print("GROQ_API_KEY is not set; skipping the live semantic check (exit 0).")
         return 0
     checker = SemanticChecker(":memory:-unused", api_key=settings.groq_api_key,
-                              model=settings.groq_model or "llama-3.3-70b-versatile")
+                              models=model_list(settings.groq_model, settings.groq_models))
     checker._cache_get = lambda key: None  # always hit the model
     checker._cache_put = lambda key, result: None
-    print(f"model: {checker.model}")
+    print(f"models (in order): {checker.models}")
     for label, lines in CASES:
         t = time.perf_counter()
         res = checker.check_inputs("footwear", "Black running shoes, size 9, under $80", lines)
         ms = (time.perf_counter() - t) * 1000
         print(f"{label:14} -> {res.category_match:8} confidence={res.confidence:.2f} "
-              f"source={res.source} variant_issues={res.variant_issues} latency={ms:.0f} ms")
+              f"source={res.source} used={checker.status().get('model')} "
+              f"variant_issues={res.variant_issues} latency={ms:.0f} ms")
     return 0
 
 
