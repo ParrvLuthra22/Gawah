@@ -8,6 +8,6 @@
 | B1 | Can we create a sandbox dispute? | todo | | |
 | B2 | Does provide-evidence work? | todo | | |
 | B3 | Can we settle a dispute? | todo | | |
-| C1 | Does the AP2 SDK install and verify a mandate? | todo | | |
+| C1 | Does the AP2 SDK install and verify a mandate? | pass for the SDK, fallback used for Gawah | Clean venv (Python 3.12), `uv pip install git+https://github.com/google-agentic-commerce/AP2` installed in ~5 s. `MandateClient.create` (issuer-signed SD-JWT over an `OpenPaymentMandate`: amount range, allowed payees, holder `cnf`) then `MandateClient.verify` with the issuer public key worked, and a wrong key raised `InvalidJWSSignature` (script: `spikes/c1_ap2.py`, ~28 lines). It does not fit behind `Signer.sign(payload) -> (signature, key_id)` in under ~30 lines: the AP2 mandate has no fields for Gawah's category, user_id, item_description, expiry or status, so signing and verifying a Gawah mandate faithfully means mapping both ways and comparing disclosed claims, and the SDK is git-only (not on PyPI) with exact version pins (cryptography 46.0.5, pydantic 2.12.5). | fallback: AP2-inspired ES256 signed JSON (`engine/gawah_engine/signing.py`) |
 | D1 | Does Channel3 return real products? | todo | | |
 | D2 | Does a free-tier LLM survive 10 demo runs? | todo | | |
