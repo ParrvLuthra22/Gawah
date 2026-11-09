@@ -24,7 +24,6 @@ SCOPES: dict[str, frozenset[str]] = {
     "system1": frozenset(
         {
             "POST /v1/proposals",
-            "POST /v1/guardian/check",  # dry run: no payment, no ledger write
             "GET /v1/mandates",
             "GET /v1/mandates/{mandate_id}",
             "POST /v1/merchants",
@@ -46,6 +45,7 @@ SCOPES: dict[str, frozenset[str]] = {
             "POST /v1/mandates",
             "POST /v1/mandates/{mandate_id}/revoke",
             "POST /v1/payments/{payment_id}/refund",
+            "POST /v1/guardian/check",  # dry run: no payment, no ledger write
         }
     ),
 }

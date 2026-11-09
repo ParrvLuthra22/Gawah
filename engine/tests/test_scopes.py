@@ -16,7 +16,7 @@ S1, S3 = "system1", "system3"
 # (method, concrete path, route template, services allowed)
 MATRIX = [
     ("POST", "/v1/proposals", "/v1/proposals", {S1}),
-    ("POST", "/v1/guardian/check", "/v1/guardian/check", {S1}),
+    ("POST", "/v1/guardian/check", "/v1/guardian/check", {S3}),
     ("GET", "/v1/mandates", "/v1/mandates", {S1, S3}),
     ("GET", "/v1/mandates/man_x", "/v1/mandates/{mandate_id}", {S1, S3}),
     ("POST", "/v1/mandates", "/v1/mandates", {S3}),
@@ -86,7 +86,7 @@ def test_health_is_open_and_needs_no_key(client):
 def test_summary_the_shopper_key_can_neither_pay_nor_refund_except_through_proposals(client):
     s1_allowed = {(m, t) for m, _p, t, a in MATRIX if S1 in a}
     assert s1_allowed == {
-        ("POST", "/v1/proposals"), ("POST", "/v1/guardian/check"),
+        ("POST", "/v1/proposals"),
         ("GET", "/v1/mandates"), ("GET", "/v1/mandates/{mandate_id}"),
         ("POST", "/v1/merchants"), ("GET", "/v1/merchants/{merchant_id}/public-key"),
     }

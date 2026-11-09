@@ -64,7 +64,7 @@ def test_bad_merchant_is_blocked():
 
 
 def test_guardian_check_returns_decision_only():
-    r = client.post("/v1/guardian/check", json=load("proposal_shoes"), headers=H1)
+    r = client.post("/v1/guardian/check", json=load("proposal_shoes"), headers=H3)
     assert r.json()["verdict"] == "ALLOW"
 
 
