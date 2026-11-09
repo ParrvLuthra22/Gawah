@@ -298,7 +298,7 @@ class Guardian:
         if advisories:
             explanation += " Advisories: " + "; ".join(advisories) + "."
         if sem is not None:
-            explanation += f" (semantic check: {sem.source})"
+            explanation += f" (semantic check: {sem.describe()})"
         decision = GuardianDecision(
             id=f"dec_{proposal.id}",
             proposal_id=proposal.id,
@@ -518,6 +518,9 @@ class GuardianService:
                         "amount_minor": p.signed_cart.total_minor,
                         "currency": p.signed_cart.currency,
                         "semantic_source": ev.semantic.source if ev.semantic else None,
+                        # which model answered, or "fallback", and why
+                        "semantic_model": (ev.semantic.model or "fallback") if ev.semantic else None,
+                        "semantic_why": ev.semantic.reason if ev.semantic else None,
                     },
                 )
                 if d.verdict == Verdict.ALLOW and self.payments is not None:

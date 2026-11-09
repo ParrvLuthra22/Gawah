@@ -8,11 +8,14 @@ Safety design:
   text or any agent message. Fields are truncated to 120 chars (mandate description to 300),
   stripped of newlines and delimiter look-alikes, and placed between markers that the system
   prompt declares untrusted data.
-- Groq with JSON output, temperature 0, 8 s timeout, one retry. Models are tried in order
-  (GROQ_MODEL first, then GROQ_MODELS): a 404 / model-not-found logs ONE warning, marks that
-  model dead for this process and moves to the next. Only when every model is out (or on any
-  other failure, or no API key) does a deterministic keyword matcher answer, marked
-  source="fallback". After such a failure the model is skipped for 60 s so a demo never stalls.
+- Groq with JSON output, temperature 0, 8 s timeout. Models are tried in order (GROQ_MODEL
+  first, then GROQ_MODELS). A 404 / model-not-found logs ONE warning and marks that model dead for
+  this process. HTTP 429, 5xx, a timeout or an unusable answer moves on to the next model; 429
+  honours Retry-After (default 60 s) and the others use the default cooldown, and a cooled-down
+  model is skipped until its cooldown expires. Only when every model is out (or there is no API
+  key) does a deterministic keyword matcher answer, marked source="fallback". Every result says
+  which model answered (or "fallback") and why (`model`, `reason`); the Guardian copies that into
+  the decision explanation and the DECISION_MADE ledger entry.
   `status()` reports the last real outcome (used by GET /health), so a silent fallback is visible.
 - Model answers are cached in SQLite by a hash of the exact prompt, so repeat runs are instant.
 """
@@ -48,8 +51,19 @@ class ModelNotFound(Exception):
     """The provider says this model does not exist (or this key cannot use it)."""
 
 
+class _Unavailable(Exception):
+    """A model could not answer right now; `cooldown_s` seconds before it is tried again."""
+
+    def __init__(self, why: str, cooldown_s: float = 0):
+        super().__init__(why)
+        self.why, self.cooldown_s = why, cooldown_s
+
+
 class SemanticResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+    model: str | None = None  # the model that answered; None for the keyword fallback
+    reason: str = ""  # why other models (or all of them) were not used
 
     category_match: Literal["match", "mismatch", "unclear"]
     variant_issues: list[str] = Field(default_factory=list)
@@ -60,6 +74,11 @@ class SemanticResult(BaseModel):
     @classmethod
     def _cap(cls, v: list[str]) -> list[str]:
         return [str(x)[:200] for x in v[:5]]
+
+    def describe(self) -> str:
+        """Short text for the decision explanation: who answered and why."""
+        who = f"{self.source} [{self.model}]" if self.model else self.source
+        return f"{who}; {self.reason}" if self.reason else who
 
     @property
     def blocks(self) -> bool:
@@ -200,6 +219,15 @@ def groq_llm(api_key: str, timeout: float = 8.0) -> ModelCall:
     return call
 
 
+def retry_after_seconds(value: str | None, default: float) -> float:
+    """Retry-After as seconds (the HTTP-date form is not used by Groq; it gets the default)."""
+    try:
+        n = float(value) if value is not None else default
+    except ValueError:
+        return default
+    return min(max(n, 1.0), 3600.0)
+
+
 def model_list(primary: str, fallbacks: str | list[str] | None) -> list[str]:
     """GROQ_MODEL first, then GROQ_MODELS in order, without duplicates."""
     extra = fallbacks.split(",") if isinstance(fallbacks, str) else list(fallbacks or [])
@@ -230,7 +258,7 @@ class SemanticChecker:
             legacy = llm_call
             client = lambda _model, messages: legacy(messages)
         self.client: ModelCall | None = client or (groq_llm(api_key) if api_key else None)
-        self._skip_until: datetime | None = None
+        self._cool: dict[str, datetime] = {}  # model -> usable again at
         self._dead: set[str] = set()
         self._lock = threading.Lock()
         self._last: dict[str, Any] = {
@@ -252,27 +280,41 @@ class SemanticChecker:
         lines = [(li.sku, li.title, li.variant) for li in cart.line_items]
         return self.check_inputs(mandate.category, mandate.item_description, lines)
 
+    def _fallback(self, category, item_description, lines, why: str) -> SemanticResult:
+        self._record("fallback", None)
+        return keyword_check(category, item_description, lines).model_copy(update={"reason": why})
+
+    def _cooling(self, model: str) -> bool:
+        until = self._cool.get(model)
+        return until is not None and self.clock() < until
+
     def check_inputs(
         self, category: str, item_description: str, lines: list[tuple[str, str, str | None]]
     ) -> SemanticResult:
-        live = [m for m in self.models if m not in self._dead]
         if self.client is None:
-            return keyword_check(category, item_description, lines)
-        if not live:
-            self._record("fallback", None)
-            return keyword_check(category, item_description, lines)
-        if self._skip_until and self.clock() < self._skip_until:
-            return keyword_check(category, item_description, lines)
+            return keyword_check(category, item_description, lines).model_copy(
+                update={"reason": "no Groq API key configured"}
+            )
         messages = build_prompt(category, item_description, lines)
-        for model in live:  # an answer cached by any still-usable model is good
-            cached = self._cache_get(self._key(model, messages))
-            if cached is not None:
-                return cached.model_copy(update={"source": "cache"})
-        for model in live:
+        trail: list[str] = []
+        for model in self.models:  # an answer cached by any still-usable model is good
+            if model not in self._dead:
+                cached = self._cache_get(self._key(model, messages))
+                if cached is not None:
+                    return cached.model_copy(update={"source": "cache", "reason": ""})
+        for model in self.models:
+            if model in self._dead:
+                trail.append(f"{model} not found")
+                continue
+            if self._cooling(model):
+                secs = max(1, round((self._cool[model] - self.clock()).total_seconds()))
+                trail.append(f"{model} cooling down ({secs}s left)")
+                continue
             try:
                 result = self._ask(model, messages)
             except ModelNotFound:
                 self._dead.add(model)
+                trail.append(f"{model} not found")
                 nxt = [m for m in self.models if m not in self._dead]
                 log.warning(
                     "Groq model %r was not found or is not available to this key; %s",
@@ -280,32 +322,47 @@ class SemanticChecker:
                     f"trying {nxt[0]!r} next" if nxt else "no models left, using the keyword fallback",
                 )
                 continue
-            if result is None:  # timeout, 429, 5xx or unusable answer: do not hammer the API
-                self._skip_until = self.clock() + timedelta(seconds=self.cooldown)
-                self._record("fallback", model)
-                return keyword_check(category, item_description, lines)
+            except _Unavailable as e:
+                if e.cooldown_s:
+                    self._cool[model] = self.clock() + timedelta(seconds=e.cooldown_s)
+                trail.append(
+                    f"{model} {e.why}" + (f", cooling {e.cooldown_s:.0f}s" if e.cooldown_s else "")
+                )
+                log.warning("Groq model %r unavailable (%s); trying the next model", model, e.why)
+                continue
+            result = result.model_copy(update={"model": model, "reason": "; ".join(trail)})
             self._record("groq", model)
             self._cache_put(self._key(model, messages), result)
             return result
-        self._record("fallback", None)
-        return keyword_check(category, item_description, lines)
+        return self._fallback(category, item_description, lines, "; ".join(trail) or "no model available")
 
     @staticmethod
     def _key(model: str, messages: list[dict[str, str]]) -> str:
         return hashlib.sha256(json.dumps([model, messages], sort_keys=True).encode()).hexdigest()
 
-    def _ask(self, model: str, messages: list[dict[str, str]]) -> SemanticResult | None:
+    def _ask(self, model: str, messages: list[dict[str, str]]) -> SemanticResult:
+        """One attempt. Raises ModelNotFound, or _Unavailable (with a cooldown) for 429, 5xx,
+        timeouts, transport errors and answers we cannot use; the caller moves to the next model."""
         assert self.client is not None
-        for _attempt in range(2):  # first try + one retry
-            try:
-                raw = self.client(model, messages)
-                data: Any = json.loads(raw)
-                return SemanticResult.model_validate({**data, "source": "model"})
-            except ModelNotFound:
-                raise
-            except (httpx.HTTPError, ValueError, KeyError, TypeError, ValidationError):
-                continue
-        return None
+        try:
+            raw = self.client(model, messages)
+        except ModelNotFound:
+            raise
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code == 429:
+                wait = retry_after_seconds(e.response.headers.get("retry-after"), self.cooldown)
+                raise _Unavailable("rate limited (429)", wait) from e
+            raise _Unavailable(f"HTTP {code}", self.cooldown) from e
+        except httpx.TimeoutException as e:
+            raise _Unavailable("timed out", self.cooldown) from e
+        except (httpx.HTTPError, OSError) as e:
+            raise _Unavailable(type(e).__name__, self.cooldown) from e
+        try:
+            data: Any = json.loads(raw)
+            return SemanticResult.model_validate({**data, "source": "model"})
+        except (ValueError, KeyError, TypeError, ValidationError) as e:
+            raise _Unavailable("returned an unusable answer", 0) from e
 
     def _cache_get(self, key: str) -> SemanticResult | None:
         conn = connect(self.path)
