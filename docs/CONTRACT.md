@@ -20,11 +20,21 @@ Send `X-Gawah-Key: <key>` on every `/v1` call. System 1 uses `SYSTEM1_KEY`; Syst
 
 ## Errors
 
-Every error has this shape (`ErrorResponse`): HTTP 401 bad key, 404 not found, 422 invalid body, 501 real mode not built yet.
+Every error has this shape (`ErrorResponse`): HTTP 401 bad key, 404 not found, 409 conflict (real mode: revoking an expired mandate), 422 invalid body, 501 real mode not built yet.
 
 ```json
 {"error": {"code": "UNAUTHORIZED", "message": "...", "details": null, "request_id": "req_ab12cd34ef56"}}
 ```
+
+## Real mode (`GAWAH_MOCK=0`)
+
+Shapes are identical to the mock; only behaviour differs. Mandates and the ledger are real (SQLite at `DATABASE_URL`, default `sqlite:///./gawah.db`). Proposals, guardian, payments, merchants and evidence still answer 501 until built.
+
+- **Mandates**: `id` is `man_<12 hex>`; `issued_at` is set by the engine (UTC, whole seconds); `currency` is upper-cased; `expires_at` must have a timezone and be in the future, `max_amount_minor` > 0, `allowed_merchants` non-empty (422 otherwise). `signing_alg` is `ES256` and `key_id` looks like `gawah-mandate-key-1` (the mock fixtures say `ed25519`). The signature covers the immutable terms (id, user_id, category, item_description, max_amount_minor, currency, allowed_merchants, issued_at, expires_at), not `status`.
+- **Status**: a mandate past `expires_at` becomes `expired` the next time it is read. `POST /v1/mandates/{id}/revoke` is idempotent for an already-revoked mandate (200, no second ledger entry) and returns 409 `MANDATE_NOT_ACTIVE` for an expired one.
+- **Ledger**: creating a mandate appends `MANDATE_CREATED` and revoking appends `MANDATE_REVOKED` (`subject_id` and `data.mandate_id` are the mandate id), in the same transaction as the mandate change. `ts` has whole-second precision. `signature` is ES256 over the entry `hash`, with `key_id` naming the ledger key (`gawah-ledger-key-N`), so rotated keys still verify old entries. The database blocks UPDATE and DELETE on the ledger. `GET /v1/ledger` also accepts `type=` and `since_seq=` (also honoured in mock mode).
+- **`GET /v1/ledger/verify`** recomputes every hash, `prev_hash` link, sequence number and signature. The response is still `{ok, checked, first_broken_seq}`; the human-readable reason is not in the contract (it is available from the service and the tamper demo).
+- Verifying a ledger by hand with `gawah_contract.hashing.verify_chain` still works on real entries; it checks hashes and links but not signatures.
 
 ## The 7 objects
 

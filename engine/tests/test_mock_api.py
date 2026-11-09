@@ -114,6 +114,7 @@ def test_merchants():
 
 
 def test_non_mock_mode_returns_501(monkeypatch):
+    # Mandates and the ledger are real in GAWAH_MOCK=0; payments are still unbuilt.
     monkeypatch.setattr(settings, "gawah_mock", False)
-    r = client.get("/v1/mandates", headers=H1)
+    r = client.get("/v1/payments", headers=H1)
     assert r.status_code == 501

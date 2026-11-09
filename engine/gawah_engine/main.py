@@ -1,13 +1,24 @@
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_mock, require_service_key
+from .config import settings
 from .errors import install_error_handlers
 from .routers import ledger, mandates, merchants, payments, proposals
+from .services import get_services
 
-app = FastAPI(title="Gawah engine (System 2)")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if not settings.gawah_mock:
+        get_services()  # create the database, run migrations, create signing keys
+    yield
+
+
+app = FastAPI(title="Gawah engine (System 2)", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,13 +38,11 @@ async def request_id_middleware(request: Request, call_next):
 
 install_error_handlers(app)
 
-for r in (
-    mandates.router,
-    proposals.router,
-    payments.router,
-    ledger.router,
-    merchants.router,
-):
+# Mandates and the ledger have real logic (GAWAH_MOCK=0); the rest is still mock-only and
+# answers 501 in real mode.
+for r in (mandates.router, ledger.router):
+    app.include_router(r, dependencies=[Depends(require_service_key)])
+for r in (proposals.router, payments.router, merchants.router):
     app.include_router(r, dependencies=[Depends(require_service_key), Depends(require_mock)])
 
 

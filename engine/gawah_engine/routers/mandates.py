@@ -5,9 +5,13 @@ from fastapi import APIRouter
 from gawah_contract import Mandate, MandateCreate, MandateStatus
 from gawah_contract.fixtures import load
 
+from ..config import settings
 from ..errors import GawahError
+from ..services import get_services
 
 router = APIRouter(prefix="/v1/mandates", tags=["mandates"])
+
+# GAWAH_MOCK=1 returns fixtures (unchanged behaviour); GAWAH_MOCK=0 uses MandateService.
 
 
 def _fixture() -> Mandate:
@@ -23,6 +27,8 @@ def _get(mandate_id: str) -> Mandate:
 
 @router.post("", response_model=Mandate, status_code=201)
 def create_mandate(body: MandateCreate) -> Mandate:
+    if not settings.gawah_mock:
+        return get_services().mandates.create(body)
     base = _fixture()
     mock_id = f"man_{uuid4().hex[:8]}"
     return base.model_copy(
@@ -38,14 +44,20 @@ def create_mandate(body: MandateCreate) -> Mandate:
 
 @router.get("", response_model=list[Mandate])
 def list_mandates() -> list[Mandate]:
+    if not settings.gawah_mock:
+        return get_services().mandates.list()
     return [_fixture()]
 
 
 @router.get("/{mandate_id}", response_model=Mandate)
 def get_mandate(mandate_id: str) -> Mandate:
+    if not settings.gawah_mock:
+        return get_services().mandates.get(mandate_id)
     return _get(mandate_id)
 
 
 @router.post("/{mandate_id}/revoke", response_model=Mandate)
 def revoke_mandate(mandate_id: str) -> Mandate:
+    if not settings.gawah_mock:
+        return get_services().mandates.revoke(mandate_id)
     return _get(mandate_id).model_copy(update={"status": MandateStatus.REVOKED})
