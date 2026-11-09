@@ -2,42 +2,20 @@
 
 from datetime import UTC, datetime, timedelta
 
-import pytest
-from fastapi.testclient import TestClient
+from conftest import KEY_S1, KEY_S3, AutoKeyClient
 from gawah_contract import ErrorResponse, LedgerVerifyResult, ProposalResult
-from gawah_contract.carts import generate_keypair, public_key_pem, sign_cart
+from gawah_contract.carts import generate_keypair, sign_cart
 from gawah_engine.config import settings
 from gawah_engine.main import app
 
 H = {"X-Gawah-Key": "real-key"}
-KEY = generate_keypair()
+from conftest import GUARDIAN_KEY as KEY
+
 N = {"n": 0}
 
 
 def _iso(delta=timedelta(0)):
     return (datetime.now(UTC) + delta).isoformat().replace("+00:00", "Z")
-
-
-@pytest.fixture
-def api(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "gawah_mock", False)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
-    monkeypatch.setattr(settings, "groq_api_key", "")
-    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'g.db'}")
-    monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
-    monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
-    with TestClient(app) as c:
-        reg = {"merchant_id": "demo-shoe-store", "key_id": "demo-shoe-store-key-1",
-               "alg": "ES256", "public_key_pem": public_key_pem(KEY)}
-        assert c.post("/v1/merchants", json=reg, headers=H).status_code == 201
-        m = c.post("/v1/mandates", headers=H, json={
-            "user_id": "u1", "category": "footwear",
-            "item_description": "Black running shoes, size 9, under $80",
-            "max_amount_minor": 8000, "currency": "USD",
-            "allowed_merchants": ["demo-shoe-store"], "expires_at": _iso(timedelta(days=7)),
-        }).json()
-        c.mandate_id = m["id"]
-        yield c
 
 
 def proposal(api, unit=6500, variant="size 9", pid=None, mandate_id=None):
@@ -63,7 +41,8 @@ def test_allow_case(api):
     r = api.post("/v1/proposals", json=proposal(api), headers=H)
     assert r.status_code == 200
     res = ProposalResult.model_validate(r.json())
-    assert res.decision.verdict == "ALLOW" and res.decision.reasons == [] and res.payment is None
+    assert res.decision.verdict == "ALLOW" and res.decision.reasons == []
+    assert res.payment is not None and res.payment.status == "PAID"  # paid via the fake PayPal
 
 
 def test_over_budget_and_size_ten_cases(api):
@@ -118,13 +97,15 @@ def test_unregistered_merchant_is_a_block_not_an_error(api):
     p["merchant_id"] = "ghost-store"
     p["signed_cart"] = sign_cart({**p["signed_cart"], "merchant_id": "ghost-store"}, generate_keypair(), "ghost-1").model_dump(mode="json")
     r = api.post("/v1/proposals", json=p, headers=H).json()
-    assert r["decision"]["verdict"] == "BLOCK" and r["decision"]["reasons"] == ["MERCHANT_NOT_ALLOWED"]
+    assert r["decision"]["verdict"] == "BLOCK" and r["decision"]["reasons"] == [
+        "MERCHANT_NOT_REGISTERED", "MERCHANT_NOT_ALLOWED"]
 
 
 def test_mock_mode_proposals_unchanged(monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     from gawah_contract.fixtures import load
 
-    r = TestClient(app).post("/v1/proposals", json=load("proposal_shoes"), headers=H).json()
+    r = AutoKeyClient(app).post("/v1/proposals", json=load("proposal_shoes"), headers=H).json()
     assert r["decision"]["id"] == "dec_01" and r["payment"]["status"] == "PAID"

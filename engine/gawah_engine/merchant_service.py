@@ -2,8 +2,13 @@
 
 Only ES256 (P-256) public keys are stored, as normalised PEM, whether the caller sent PEM or a
 JWK. A (merchant_id, key_id) pair is write-once: re-registering the same key is a no-op, but
-registering a different key under an existing key id is refused, so a key can only change by
-rotating to a new key id. Carts name their key via `key_id`, so old and new keys can coexist.
+registering a different key under an existing key id is refused.
+
+Takeover protection: over the API, a merchant that already has a key can NOT get a second one
+(409 MERCHANT_KEY_CONFLICT), because the API has no proof that the caller owns the merchant.
+Rotation is an operator action with database access (`register(..., allow_rotation=True)`, used
+by scripts/dev_merchant.py): register a new key_id and sign new carts with it. Carts name their
+key via `key_id`, so old and new keys coexist.
 """
 
 import re
@@ -37,7 +42,7 @@ class MerchantService:
     def __init__(self, path: str, clock: Callable[[], datetime] = utcnow):
         self.path, self.clock = path, clock
 
-    def register(self, body: MerchantKey) -> MerchantKey:
+    def register(self, body: MerchantKey, *, allow_rotation: bool = False) -> MerchantKey:
         if body.alg.upper() != ALG:
             raise GawahError(422, "VALIDATION_ERROR", f"alg must be {ALG} (EC P-256 keys only)")
         for name in ("merchant_id", "key_id"):
@@ -65,6 +70,15 @@ class MerchantService:
                         "use a new key_id to rotate",
                     )
                 return _row_to_key(row)
+            if not allow_rotation and conn.execute(
+                "SELECT 1 FROM merchants WHERE merchant_id = ? LIMIT 1", (body.merchant_id,)
+            ).fetchone():
+                raise GawahError(
+                    409,
+                    "MERCHANT_KEY_CONFLICT",
+                    f"Merchant {body.merchant_id!r} already has a registered key; "
+                    "key rotation needs operator action",
+                )
             conn.execute(
                 "INSERT INTO merchants (merchant_id, key_id, alg, public_key_pem, registered_at)"
                 " VALUES (?,?,?,?,?)",

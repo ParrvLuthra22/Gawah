@@ -2,98 +2,22 @@
 
 import inspect
 import json
-from datetime import timedelta
 
 import httpx
 import pytest
-from conftest import make_body
 from gawah_contract import (
     GuardianDecision,
     LedgerEntryType,
-    MerchantKey,
     Product,
-    PurchaseProposal,
     ReasonCode,
     Verdict,
 )
-from gawah_contract.carts import generate_keypair, public_key_pem, sign_cart
+from gawah_contract.carts import generate_keypair
 from gawah_engine.errors import GawahError
 from gawah_engine.guardian import Guardian
 from gawah_engine.mandate_service import MandateNotFound
-from gawah_engine.semantic import SemanticChecker, build_prompt
-
-STORE = "demo-shoe-store"
-KEY_ID = "demo-shoe-store-key-1"
-
-
-class World:
-    """A mandate ($80 footwear, size 9), a registered demo store, and a proposal factory."""
-
-    def __init__(self, svc, clock):
-        self.svc, self.clock, self.n = svc, clock, 0
-        self.key = generate_keypair()
-        self.register(STORE, self.key)
-        self.mandate = svc.mandates.create(make_body(clock))
-        self.model_calls: list[list[dict]] = []
-
-    def register(self, merchant, key, key_id=KEY_ID):
-        self.svc.merchants.register(
-            MerchantKey(merchant_id=merchant, key_id=key_id, alg="ES256", public_key_pem=public_key_pem(key))
-        )
-
-    def set_model(self, reply, clock=None):
-        """Install a fake model. `reply` is a dict/str to return, or an exception to raise."""
-
-        def call(messages):
-            self.model_calls.append(messages)
-            if isinstance(reply, Exception):
-                raise reply
-            return reply if isinstance(reply, str) else json.dumps(reply)
-
-        self.svc.guardian.semantic = SemanticChecker(self.svc.path, llm_call=call, clock=self.clock)
-
-    def cart(self, *, merchant=STORE, signer=None, key_id=KEY_ID, sku="SHOE-BLK-RUN",
-             title="Black Runner", variant="size 9", qty=1, unit=6500, currency="USD",
-             expires_in=3600, cart_id=None, tamper=None):
-        self.n += 1
-        cart = {
-            "cart_id": cart_id or f"cart_{self.n}",
-            "merchant_id": merchant,
-            "line_items": [{"sku": sku, "title": title, "variant": variant, "quantity": qty,
-                            "unit_price_minor": unit}],
-            "total_minor": qty * unit,
-            "currency": currency,
-            "expires_at": (self.clock() + timedelta(seconds=expires_in)).isoformat(),
-            "signature": "",
-            "key_id": key_id,
-        }
-        signed = sign_cart(cart, signer or self.key, key_id).model_dump(mode="json")
-        if tamper:
-            tamper(signed)
-        return signed
-
-    def proposal(self, cart=None, *, pid=None, rationale="Black running shoes, size 9.", **over):
-        self.n += 1
-        cart = cart or self.cart()
-        line = cart["line_items"][0]
-        fields = {
-            "id": pid or f"prop_{self.n}",
-            "mandate_id": self.mandate.id,
-            "agent_id": "shopper-agent-1",
-            "merchant_id": cart["merchant_id"],
-            "product": Product(id=line["sku"], title=line["title"], url="https://x.example/p"),
-            "quantity": line["quantity"],
-            "unit_price_minor": line["unit_price_minor"],
-            "currency": cart["currency"],
-            "rationale": rationale,
-            "signed_cart": cart,
-            "created_at": self.clock(),
-        }
-        fields.update(over)
-        return PurchaseProposal(**fields)
-
-    def entries(self, **kw):
-        return self.svc.ledger.list(**kw)
+from gawah_engine.semantic import build_prompt
+from world import KEY_ID, STORE, World
 
 
 @pytest.fixture
@@ -189,7 +113,10 @@ def _after_reservation(w):
 CASES = [
     pytest.param(lambda w: w.proposal(), "ALLOW", [], id="01-shoes-65-allow"),
     pytest.param(_over_budget, "BLOCK", ["OVER_BUDGET"], id="02-120-over-budget"),
-    pytest.param(_bad_merchant_unregistered, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="03a-unregistered-merchant"),
+    pytest.param(
+        _bad_merchant_unregistered, "BLOCK", ["MERCHANT_NOT_REGISTERED", "MERCHANT_NOT_ALLOWED"],
+        id="03a-unregistered-merchant",
+    ),
     pytest.param(_bad_merchant_registered, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="03b-merchant-not-in-mandate"),
     pytest.param(_tampered_cart, "BLOCK", ["CART_SIGNATURE_INVALID"], id="04-tampered-cart"),
     pytest.param(_price_mismatch, "BLOCK", ["PRICE_MISMATCH"], id="05-proposal-price-differs"),
@@ -209,8 +136,11 @@ CASES = [
     pytest.param(_watch_without_model, "BLOCK", ["CATEGORY_MISMATCH"], id="14c-watch-fallback"),
     pytest.param(_after_reservation, "BLOCK", ["OVER_BUDGET"], id="16-budget-reduced-by-reservation"),
     pytest.param(_unknown_cart_key, "BLOCK", ["CART_SIGNATURE_INVALID"], id="x-unknown-cart-key-id"),
-    pytest.param(_cart_expired, "BLOCK", ["CART_SIGNATURE_INVALID"], id="x-cart-expired"),
-    pytest.param(_cart_merchant_differs, "BLOCK", ["MERCHANT_NOT_ALLOWED"], id="x-cart-merchant-differs"),
+    pytest.param(_cart_expired, "BLOCK", ["CART_EXPIRED"], id="x-cart-expired"),
+    pytest.param(
+        _cart_merchant_differs, "BLOCK", ["MERCHANT_MISMATCH", "MERCHANT_NOT_ALLOWED"],
+        id="x-cart-merchant-differs",
+    ),
 ]
 
 
@@ -434,6 +364,17 @@ def test_guardian_evaluate_is_a_pure_function_call(w):
     assert Guardian.evaluate(p, w.mandate, key, 8000, now, **kw) == d  # deterministic
     assert Guardian.evaluate(p, w.mandate, key, 100, now, **kw).reasons == [ReasonCode.OVER_BUDGET]
     bad = Guardian.evaluate(p, w.mandate, None, 8000, now, merchant_registered=False, **kw)
-    assert bad.reasons == [ReasonCode.MERCHANT_NOT_ALLOWED]
+    assert bad.reasons == [ReasonCode.MERCHANT_NOT_REGISTERED]
     forged = Guardian.evaluate(p, w.mandate, key, 8000, now, mandate_check=(False, "MANDATE_SIGNATURE_INVALID"))
-    assert forged.verdict == Verdict.BLOCK and forged.reasons == [ReasonCode.MANDATE_REVOKED]
+    assert forged.verdict == Verdict.BLOCK
+    assert forged.reasons == [ReasonCode.MANDATE_SIGNATURE_INVALID]
+
+
+def test_tampered_mandate_is_reported_as_signature_invalid(w):
+    p = w.proposal()
+    forged = w.mandate.model_copy(update={"max_amount_minor": 900000})  # signed terms edited
+    d = Guardian.evaluate(
+        p, forged, w.svc.merchants.get(STORE, KEY_ID), 900000, w.clock(),
+        mandate_check=w.svc.mandates.verify_mandate(forged),
+    )
+    assert d.reasons == [ReasonCode.MANDATE_SIGNATURE_INVALID]

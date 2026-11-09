@@ -1,20 +1,25 @@
 from contextlib import asynccontextmanager
+from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from .auth import require_mock, require_service_key
+from .auth import require_service_key
 from .config import settings
 from .errors import install_error_handlers
+from .harden import BodyLimitMiddleware
 from .routers import ledger, mandates, merchants, payments, proposals
-from .services import get_services
+from .services import check_fake_paypal_allowed, get_services
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    check_fake_paypal_allowed()
     if not settings.gawah_mock:
-        get_services()  # create the database, run migrations, create signing keys
+        # create the database, run migrations, create signing keys, then settle any payment
+        # a crash left in RESERVED (reads PayPal; never guesses)
+        get_services().payments.reconcile()
     yield
 
 
@@ -28,6 +33,9 @@ app.add_middleware(
 )
 
 
+app.add_middleware(BodyLimitMiddleware)  # outermost: 64 KB cap and no floats in money fields
+
+
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     request.state.request_id = request.headers.get("x-request-id") or f"req_{uuid4().hex[:12]}"
@@ -38,14 +46,18 @@ async def request_id_middleware(request: Request, call_next):
 
 install_error_handlers(app)
 
-# Mandates and the ledger have real logic (GAWAH_MOCK=0); the rest is still mock-only and
-# answers 501 in real mode.
-for r in (mandates.router, ledger.router, merchants.router, proposals.router):
+# Every /v1 route needs a valid key AND the route in that key's scope (see auth.SCOPES).
+for r in (
+    mandates.router, ledger.router, merchants.router, proposals.router, payments.router
+):
     app.include_router(r, dependencies=[Depends(require_service_key)])
-for r in (payments.router,):
-    app.include_router(r, dependencies=[Depends(require_service_key), Depends(require_mock)])
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "gawah"}
+def health() -> dict[str, Any]:
+    """Liveness plus the semantic check's LAST REAL outcome, so a silent fallback is visible."""
+    base: dict[str, Any] = {"status": "ok", "service": "gawah"}
+    if settings.gawah_mock:
+        return {**base, "semantic": "fallback", "model": None}  # mock mode never calls a model
+    st = get_services().guardian.semantic.status()
+    return {**base, "semantic": st["semantic"], "model": st["model"]}

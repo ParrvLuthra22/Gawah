@@ -5,8 +5,8 @@ import stat
 from pathlib import Path
 
 import pytest
+from conftest import KEY_S1, KEY_S3, AutoKeyClient
 from cryptography.hazmat.primitives import serialization
-from fastapi.testclient import TestClient
 from gawah_contract import MerchantKey
 from gawah_contract.carts import generate_keypair, public_key_pem, verify_cart
 from gawah_contract.fixtures import load
@@ -68,7 +68,10 @@ def test_key_id_is_write_once_but_idempotent_and_rotatable(svc):
     with pytest.raises(GawahError) as e:
         svc.merchants.register(_body(k2))  # same key id, different key
     assert e.value.status == 409 and e.value.code == "KEY_ID_CONFLICT"
-    b = svc.merchants.register(_body(k2, key_id="m1-key-2"))  # rotation
+    with pytest.raises(GawahError) as e2:  # the API path: a second key for the merchant is refused
+        svc.merchants.register(_body(k2, key_id="m1-key-2"))
+    assert e2.value.status == 409 and e2.value.code == "MERCHANT_KEY_CONFLICT"
+    b = svc.merchants.register(_body(k2, key_id="m1-key-2"), allow_rotation=True)  # operator
     assert svc.merchants.get("m1") == b  # latest wins when no key id is given
     assert svc.merchants.get("m1", "m1-key-1") == a  # old key still resolvable by id
 
@@ -76,11 +79,12 @@ def test_key_id_is_write_once_but_idempotent_and_rotatable(svc):
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", False)
-    monkeypatch.setattr(settings, "system1_key", "real-key")
+    monkeypatch.setattr(settings, "system1_key", KEY_S1)
+    monkeypatch.setattr(settings, "system3_key", KEY_S3)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'm.db'}")
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "keys"))
-    with TestClient(app) as c:
+    with AutoKeyClient(app) as c:
         yield c
 
 

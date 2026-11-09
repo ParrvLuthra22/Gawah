@@ -122,6 +122,14 @@
           "title": "Checked",
           "type": "integer"
         },
+        "checks": {
+          "description": "Per-check breakdown (evidence bundles); empty for a plain ledger verify",
+          "items": {
+            "$ref": "#/$defs/VerificationCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
         "first_broken_seq": {
           "anyOf": [
             {
@@ -487,7 +495,11 @@
         "CURRENCY_MISMATCH",
         "CATEGORY_MISMATCH",
         "DUPLICATE",
-        "PRICE_MISMATCH"
+        "PRICE_MISMATCH",
+        "MANDATE_SIGNATURE_INVALID",
+        "CART_EXPIRED",
+        "MERCHANT_MISMATCH",
+        "MERCHANT_NOT_REGISTERED"
       ],
       "title": "ReasonCode",
       "type": "string"
@@ -555,6 +567,33 @@
       ],
       "title": "Verdict",
       "type": "string"
+    },
+    "VerificationCheck": {
+      "additionalProperties": false,
+      "description": "One named check inside a verification result (additive; see docs/CONTRACT.md).",
+      "properties": {
+        "detail": {
+          "default": "",
+          "description": "Human-readable outcome of this check",
+          "title": "Detail",
+          "type": "string"
+        },
+        "name": {
+          "description": "ledger_chain | mandate_signature | cart_signature | payment_reference_match",
+          "title": "Name",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "ok"
+      ],
+      "title": "VerificationCheck",
+      "type": "object"
     }
   },
   "additionalProperties": false,

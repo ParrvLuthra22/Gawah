@@ -282,83 +282,115 @@ class MandateService:
             current = self.get(mandate.id)
         except MandateNotFound:
             return False, "MANDATE_NOT_FOUND"
+        return self._status_reason(current)
+
+    def _status_reason(self, current: Mandate) -> tuple[bool, str | None]:
         if reason := check_revocation(current):
             return False, reason.value
         if reason := check_expiry(current, self.clock()):
             return False, reason.value
         return True, None
 
+    def get_in(self, conn: sqlite3.Connection, mandate_id: str) -> Mandate:
+        """`get` inside a write transaction the caller already holds."""
+        self._expire_due(conn)
+        return _row_to_mandate(self._row(conn, mandate_id))
+
+    def verify_in(self, conn: sqlite3.Connection, mandate: Mandate) -> tuple[bool, str | None]:
+        """`verify_mandate` inside a write transaction the caller already holds."""
+        if not self.signer.verify(signable(mandate), mandate.signature, mandate.key_id):
+            return False, "MANDATE_SIGNATURE_INVALID"
+        try:
+            current = self.get_in(conn, mandate.id)
+        except MandateNotFound:
+            return False, "MANDATE_NOT_FOUND"
+        return self._status_reason(current)
+
     # -- budget ------------------------------------------------------------------------
     def budget(self, mandate_id: str) -> Budget:
         conn = connect(self.path)
         try:
-            row = self._row(conn, mandate_id)
+            return self.budget_in(conn, mandate_id)
         finally:
             conn.close()
+
+    def budget_in(self, conn: sqlite3.Connection, mandate_id: str) -> Budget:
+        row = self._row(conn, mandate_id)
         return Budget(row["max_amount_minor"], row["spent_minor"], row["reserved_minor"])
 
     def reserve(self, mandate_id: str, amount_minor: int, idempotency_key: str) -> Reservation:
+        with write_tx(self.path) as conn:
+            return self.reserve_in(conn, mandate_id, amount_minor, idempotency_key)
+
+    def reserve_in(
+        self, conn: sqlite3.Connection, mandate_id: str, amount_minor: int, idempotency_key: str
+    ) -> Reservation:
+        """Reserve inside a write transaction the caller already holds (BEGIN IMMEDIATE)."""
         if amount_minor <= 0:
             raise GawahError(422, "VALIDATION_ERROR", "amount_minor must be positive")
-        with write_tx(self.path) as conn:
-            self._expire_due(conn)
-            row = self._row(conn, mandate_id)
-            existing = conn.execute(
-                "SELECT * FROM reservations WHERE mandate_id = ? AND idempotency_key = ?",
-                (mandate_id, idempotency_key),
-            ).fetchone()
-            if existing is not None:
-                if existing["amount_minor"] != amount_minor:
-                    raise IdempotencyConflict(idempotency_key, "reused with a different amount")
-                return Reservation(
-                    mandate_id, idempotency_key, amount_minor, existing["state"], replayed=True
-                )
-            if row["status"] != "active":
-                raise MandateNotActive(mandate_id, row["status"])
-            budget = Budget(row["max_amount_minor"], row["spent_minor"], row["reserved_minor"])
-            if check_spend_limit(budget, amount_minor):
-                raise BudgetExceeded(mandate_id, amount_minor, budget.remaining_minor)
-            conn.execute(
-                "INSERT INTO reservations (mandate_id, idempotency_key, amount_minor, state,"
-                " created_at) VALUES (?,?,?,'reserved',?)",
-                (mandate_id, idempotency_key, amount_minor, format_ts(self.clock())),
+        self._expire_due(conn)
+        row = self._row(conn, mandate_id)
+        existing = conn.execute(
+            "SELECT * FROM reservations WHERE mandate_id = ? AND idempotency_key = ?",
+            (mandate_id, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            if existing["amount_minor"] != amount_minor:
+                raise IdempotencyConflict(idempotency_key, "reused with a different amount")
+            return Reservation(
+                mandate_id, idempotency_key, amount_minor, existing["state"], replayed=True
             )
-            conn.execute(
-                "UPDATE mandates SET reserved_minor = reserved_minor + ? WHERE id = ?",
-                (amount_minor, mandate_id),
-            )
+        if row["status"] != "active":
+            raise MandateNotActive(mandate_id, row["status"])
+        budget = Budget(row["max_amount_minor"], row["spent_minor"], row["reserved_minor"])
+        if check_spend_limit(budget, amount_minor):
+            raise BudgetExceeded(mandate_id, amount_minor, budget.remaining_minor)
+        conn.execute(
+            "INSERT INTO reservations (mandate_id, idempotency_key, amount_minor, state,"
+            " created_at) VALUES (?,?,?,'reserved',?)",
+            (mandate_id, idempotency_key, amount_minor, format_ts(self.clock())),
+        )
+        conn.execute(
+            "UPDATE mandates SET reserved_minor = reserved_minor + ? WHERE id = ?",
+            (amount_minor, mandate_id),
+        )
         return Reservation(mandate_id, idempotency_key, amount_minor, "reserved")
 
-    def _settle(self, mandate_id: str, key: str, target: str) -> Reservation:
+    def settle_in(
+        self, conn: sqlite3.Connection, mandate_id: str, key: str, target: str
+    ) -> Reservation:
         """Move a reservation from 'reserved' to 'committed' or 'released' (idempotent)."""
-        with write_tx(self.path) as conn:
-            res = conn.execute(
-                "SELECT * FROM reservations WHERE mandate_id = ? AND idempotency_key = ?",
-                (mandate_id, key),
-            ).fetchone()
-            if res is None:
-                raise GawahError(404, "RESERVATION_NOT_FOUND", f"No reservation {key!r}")
-            amount = res["amount_minor"]
-            if res["state"] == target:
-                return Reservation(mandate_id, key, amount, target, replayed=True)
-            if res["state"] != "reserved":
-                raise IdempotencyConflict(key, f"already {res['state']}, cannot {target}")
+        res = conn.execute(
+            "SELECT * FROM reservations WHERE mandate_id = ? AND idempotency_key = ?",
+            (mandate_id, key),
+        ).fetchone()
+        if res is None:
+            raise GawahError(404, "RESERVATION_NOT_FOUND", f"No reservation {key!r}")
+        amount = res["amount_minor"]
+        if res["state"] == target:
+            return Reservation(mandate_id, key, amount, target, replayed=True)
+        if res["state"] != "reserved":
+            raise IdempotencyConflict(key, f"already {res['state']}, cannot {target}")
+        conn.execute(
+            "UPDATE reservations SET state = ? WHERE mandate_id = ? AND idempotency_key = ?",
+            (target, mandate_id, key),
+        )
+        if target == "committed":
             conn.execute(
-                "UPDATE reservations SET state = ? WHERE mandate_id = ? AND idempotency_key = ?",
-                (target, mandate_id, key),
+                "UPDATE mandates SET reserved_minor = reserved_minor - ?,"
+                " spent_minor = spent_minor + ? WHERE id = ?",
+                (amount, amount, mandate_id),
             )
-            if target == "committed":
-                conn.execute(
-                    "UPDATE mandates SET reserved_minor = reserved_minor - ?,"
-                    " spent_minor = spent_minor + ? WHERE id = ?",
-                    (amount, amount, mandate_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE mandates SET reserved_minor = reserved_minor - ? WHERE id = ?",
-                    (amount, mandate_id),
-                )
+        else:
+            conn.execute(
+                "UPDATE mandates SET reserved_minor = reserved_minor - ? WHERE id = ?",
+                (amount, mandate_id),
+            )
         return Reservation(mandate_id, key, amount, target)
+
+    def _settle(self, mandate_id: str, key: str, target: str) -> Reservation:
+        with write_tx(self.path) as conn:
+            return self.settle_in(conn, mandate_id, key, target)
 
     def commit(self, mandate_id: str, idempotency_key: str) -> Reservation:
         """The payment succeeded: reserved -> spent. Works even if the mandate was revoked since."""
@@ -367,3 +399,12 @@ class MandateService:
     def release(self, mandate_id: str, idempotency_key: str) -> Reservation:
         """The payment did not happen: give the reserved amount back."""
         return self._settle(mandate_id, idempotency_key, "released")
+
+    def refund_in(self, conn: sqlite3.Connection, mandate_id: str, amount_minor: int) -> None:
+        """A paid purchase was refunded in full: return its amount to the mandate's budget."""
+        cur = conn.execute(
+            "UPDATE mandates SET spent_minor = spent_minor - ? WHERE id = ? AND spent_minor >= ?",
+            (amount_minor, mandate_id, amount_minor),
+        )
+        if cur.rowcount != 1:
+            raise GawahError(409, "BUDGET_INCONSISTENT", "refund exceeds the spent amount")
