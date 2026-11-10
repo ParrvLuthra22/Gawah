@@ -36,7 +36,7 @@ line-length = 100
 extend-exclude = ["web"]
 
 [tool.uv.workspace]
-members = ["contract"]
+members = ["contract", "system1"]
 
 [tool.uv.sources]
 gawah-contract = { workspace = true }
