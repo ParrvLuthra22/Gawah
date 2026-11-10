@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -295,6 +295,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "gawah-shopper" },
     { name = "playwright" },
 ]
 
@@ -314,7 +315,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "playwright", specifier = ">=1.64.1" }]
+dev = [
+    { name = "gawah-shopper", editable = "system1" },
+    { name = "playwright", specifier = ">=1.64.1" },
+]
 
 [[package]]
 name = "gawah-contract"
