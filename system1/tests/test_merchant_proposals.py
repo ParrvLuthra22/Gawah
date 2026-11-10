@@ -38,6 +38,8 @@ def test_prepares_merchant_verified_signed_cart(tmp_path) -> None:
     proposal = service.prepare(request())
 
     assert proposal.merchant_id == "demo-sports"
+    assert proposal.product.id == "NIKE-SWIFTRUN-12-BLK"
+    assert proposal.product.id == proposal.signed_cart.line_items[0].sku
     assert proposal.unit_price_minor == 5999
     assert proposal.signed_cart.total_minor == 5999
     merchant_key = service.merchant.merchant_key(proposal.merchant_id)
