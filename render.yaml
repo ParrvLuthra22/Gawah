@@ -100,22 +100,28 @@ services:
       - key: SYSTEM3_KEY            # server-side only. Never a NEXT_PUBLIC_ variable.
         sync: false
 
-  # ---- System 1: shopper agent (DISABLED until Suvir's code is merged and runs) --------------
+  # ---- System 1: shopper agent (DISABLED ON PURPOSE: see docs/DEPLOY.md, "gawah-shopper") --------
+  # The build and start commands below are verified: from a clean checkout,
+  # `uv sync --frozen --package gawah-shopper` installs the shopper and, through the workspace
+  # dependency on the root package `gawah`, the `gawah_engine` code it imports (ES256Signer); the
+  # app then answers /health. It stays commented out because a hosted shopper cannot yet take part
+  # in the demo: its cart-signing key is made on this ephemeral disk but the engine registers
+  # merchant keys write-once, nothing registers `demo-sports`, the shopper has no engine client, and
+  # its /shopping/* routes have no authentication (anyone could spend the Groq quota).
   # - type: web
   #   name: gawah-shopper
   #   runtime: python
   #   plan: free
-  #   buildCommand: <fill in from system1/README once merged>
-  #   startCommand: <fill in; must listen on 0.0.0.0:$PORT>
+  #   buildCommand: pip install uv && uv sync --frozen --package gawah-shopper
+  #   startCommand: .venv/bin/python -m uvicorn shopper.main:app --host 0.0.0.0 --port $PORT
   #   healthCheckPath: /health
   #   envVars:
   #     - key: PYTHON_VERSION
   #       value: 3.12.8
-  #     - key: ENGINE_URL           # the gawah-engine URL
+  #     - key: GROQ_API_KEY         # System 1's Settings requires it
   #       sync: false
-  #     - key: SYSTEM1_KEY          # same value as the engine's SYSTEM1_KEY. No payment keys.
-  #       sync: false
-  #     - key: GROQ_API_KEY
-  #       sync: false
+  #     - key: MERCHANT_SIGNING_KEY_PATH   # default keys/system1-merchant is wiped on every restart
+  #       value: /var/data/system1-merchant  # needs a persistent disk (paid plan) to be meaningful
   #     - key: CHANNEL3_API_KEY
   #       sync: false
+  #     # ENGINE_URL / SYSTEM1_KEY go here once the shopper has an engine client (not true today).

@@ -2,7 +2,7 @@
 
 Three web services from one Blueprint (`render.yaml`): **gawah-engine** (System 2), **gawah-counsel**
 (System 3 API) and **gawah-web** (Next.js). System 1's shopper is an optional fourth, commented out
-in `render.yaml` until Suvir's code is merged and runs.
+in `render.yaml` on purpose (see "gawah-shopper" below).
 
 ```
 browser ──> gawah-web ──(server adds X-Gawah-Key = SYSTEM3_KEY)──> gawah-counsel ──> gawah-engine ──> PayPal sandbox
@@ -100,10 +100,32 @@ Counsel runs `alembic upgrade head` on every start (`scripts/start_counsel.sh`).
 | `SYSTEM3_API_URL` | dashboard | gawah-counsel URL (step 6) |
 | `SYSTEM3_KEY` | dashboard | step 1. Read only by the Next.js server's proxy route. **Never a `NEXT_PUBLIC_` variable.** |
 
-### gawah-shopper (optional, later)
+### gawah-shopper (not deployed; the block in `render.yaml` stays commented out)
 
-Uncomment the block in `render.yaml` once System 1 runs. It needs `ENGINE_URL`, `SYSTEM1_KEY`
-(same as the engine's), `GROQ_API_KEY`, `CHANNEL3_API_KEY`, and no PayPal or payment key.
+System 1's shopper (`system1/`) **can** run standalone, and `render.yaml` carries the verified
+commands. It is left off on purpose, because on Render it could not take part in the demo:
+
+- **It imports the engine.** `system1/shopper/merchant/demo_merchant.py` uses
+  `gawah_engine.signing.ES256Signer`, and `system1/pyproject.toml` depends on the workspace
+  packages `gawah` (the root, which contains `gawah_engine`) and `gawah-contract`. The build
+  resolves them with `uv sync --frozen --package gawah-shopper`: uv installs the shopper and its
+  workspace dependencies from the checkout, so the whole engine package (and its dependencies)
+  ships with the shopper. Checked from a clean virtualenv: `/health` and `/shopping/demo/products`
+  answer.
+- **The cart-signing key and the engine's merchant registry cannot stay in step.** The shopper
+  creates its ES256 key on first use under `MERCHANT_SIGNING_KEY_PATH` (default `keys/system1-merchant`,
+  on Render's ephemeral disk, so a new key after every restart). The engine registers one key per
+  merchant and refuses to replace it (`409 MERCHANT_KEY_CONFLICT`), and the engine's hosted bootstrap
+  registers `demo-shoe-store` only, not the shopper's `demo-sports`. After a restart of either side,
+  every cart is blocked as `MERCHANT_NOT_REGISTERED` or `CART_SIGNATURE_INVALID`.
+- **The shopper does not call the engine.** `shopper/config.py` has no engine URL or `SYSTEM1_KEY`;
+  nothing in `system1/` posts a proposal. `integration/e2e.py` does that step today.
+- **Its proposals are blocked until a one-line fix** (`docs/INTEGRATION_ISSUES.md` #5).
+- **No authentication on `/shopping/*`**: a public shopper lets anyone spend the Groq quota.
+
+To enable it later: Suvir fixes #5 and adds an engine client; the shopper's key is supplied from
+the environment (or its public key is registered after each deploy); then uncomment the block.
+Until then run the shopper locally: `make e2e` proves the chain without any hosted shopper.
 
 ## 3. Dashboard checklist (what you do by hand)
 
