@@ -15,7 +15,11 @@ cp web/.env.example web/.env.local
 
 For the local mock engine, generate a random service key with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and put it in `SYSTEM3_KEY` in all three files. To use separate keys, set Counsel's `SYSTEM2_KEY` to the engine's `SYSTEM3_KEY`, and match Counsel's `SYSTEM3_KEY` in `web/.env.local`. The Next.js server adds the Counsel key to allowlisted API requests.
 
-Start each service in its own terminal.
+Start everything with one command, or each service in its own terminal.
+
+```sh
+make dev-all   # engine 8000, counsel 8002, web 3000 together; Ctrl-C stops all (shopper uses 8001)
+```
 
 | Command | Service |
 | --- | --- |
@@ -44,7 +48,11 @@ To exercise resolution locally, set `ENABLE_SANDBOX_RESOLUTION=true` in `system3
 
 The API contract for the three systems is in `docs/CONTRACT.md`; ownership is in `OWNERS.md`.
 
-`make test` runs the tests and `make lint` runs ruff. Never commit `.env` or anything under `keys/`.
+`make install` installs all three systems; `make test` runs the engine and contract tests, Counsel's tests and the web tests; `make lint` runs ruff.
+
+## Hosted demo (Render)
+
+`render.yaml` deploys the engine, Counsel and the web app on Render; the steps and the checklist are in [docs/DEPLOY.md](docs/DEPLOY.md), and `scripts/smoke_remote.py` checks the deployed stack hop by hop. It is a **PayPal sandbox** demo on **free instances: the filesystem is ephemeral and instances sleep when idle**, so all hosted data (mandates, ledger, keys, Counsel's database) is reset on every restart or redeploy, and the first request after a sleep can take about a minute. The engine's `GAWAH_BOOTSTRAP=1` recreates an empty database, new signing keys and the demo merchant on each start, so the ledger and its keys always match. `POST /v1/admin/reset-demo` (admin key, `GAWAH_ENV=demo` only) resets the engine on demand for re-recording. Never commit `.env` or anything under `keys/`.
 
 ## Status
 

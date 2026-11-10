@@ -100,7 +100,7 @@ Applied before any logic runs; violations are `422 VALIDATION_ERROR` with `detai
 
 ## Health
 
-`GET /health` returns `{"status","service","semantic": "groq" | "fallback", "model": <name or null>}` where `semantic` is the **last real outcome** of the category check: `groq` when a model answered (and which), `fallback` when the keyword matcher did (no key, every model not found, timeout or rate limit). Mock mode always reports `fallback`. Models: `GROQ_MODEL` (default `openai/gpt-oss-20b`) then `GROQ_MODELS` (default `openai/gpt-oss-20b,openai/gpt-oss-120b`); a 404 logs one warning, drops that model for this process and tries the next.
+`GET /health` returns `{"status","service","env","mock","paypal":"sandbox","semantic": "groq" | "fallback", "model": <name or null>}` where `semantic` is the **last real outcome** of the category check: `groq` when a model answered (and which), `fallback` when the keyword matcher did (no key, every model not found, timeout or rate limit). Mock mode always reports `fallback`. Models: `GROQ_MODEL` (default `openai/gpt-oss-20b`) then `GROQ_MODELS` (default `openai/gpt-oss-20b,openai/gpt-oss-120b`); a 404 logs one warning, drops that model for this process and tries the next.
 
 ## Contract changes in this pass (all additive)
 
@@ -152,7 +152,7 @@ All examples assume `H='X-Gawah-Key: yourkey'` and `B=http://localhost:8000`.
 | `GET /v1/ledger/head`, `GET /v1/ledger/stream` | Signed head of the ledger / live Server-Sent Events feed (see Live feed) |
 | `GET /v1/evidence/{payment_id}` | Full bundle for Dispute Counsel: mandate, proposal, signed cart, decision, payment, ledger entries, verification |
 | `POST /v1/merchants`, `GET /v1/merchants/{id}/public-key` | Register / fetch a store's public key (`MerchantKey`) |
-| `GET /health` | `{"status":"ok","service":"gawah","semantic":"groq"\|"fallback","model":...}` |
+| `GET /health` | `{"status":"ok","service":"gawah","env":"dev"\|"demo"\|"test","mock":bool,"paypal":"sandbox","semantic":"groq"\|"fallback","model":...}` |
 
 ```sh
 curl -X POST $B/v1/proposals -H "$H" -H 'Content-Type: application/json' -d @contract/fixtures/proposal_shoes.json
@@ -168,3 +168,10 @@ curl $B/v1/evidence/pay_04 -H "$H"
 curl -X POST $B/v1/merchants -H "$H" -H 'Content-Type: application/json' -d '{"merchant_id":"demo-shoe-store","key_id":"k1","alg":"ed25519","public_key_pem":"-----BEGIN PUBLIC KEY-----..."}'
 curl $B/v1/merchants/demo-shoe-store/public-key -H "$H"
 ```
+
+## Hosted demo additions (additive; no contract model changed)
+
+- `GET /health` gains `env` (`GAWAH_ENV`, `"dev"` when unset), `mock` (bool) and `paypal` (always `"sandbox"`).
+- `POST /v1/admin/reset-demo`, header `X-Admin-Key` (= `ADMIN_KEY`). Not in any service scope. `403 ADMIN_DISABLED` unless `GAWAH_ENV=demo`; `401 UNAUTHORIZED` for a missing or wrong key (also when `ADMIN_KEY` is unset); `429` after 10 attempts a minute; `409 MOCK_MODE` in mock mode. On success deletes the database and signing keys, bootstraps again and returns `{"status":"reset","ledger_head_seq":0,"ledger_key_id","mandate_key_id","merchant_id"}`. Single engine process only.
+- `GAWAH_BOOTSTRAP=1`: on start, if the database has no ledger entries and no mandates, create the schema, the ledger and mandate signing keys, and the `demo-shoe-store` merchant key (private key stays in the key directory, public key is registered). Nothing else is seeded. A database that has data but lacks its signing keys stops the engine instead of minting new keys.
+- `ENGINE_CORS_ORIGINS`: comma-separated allowed browser origins (default `http://localhost:3000`).
