@@ -23,6 +23,7 @@ PayPal tokens or raw PayPal error bodies is ever logged, ledgered, stored or ret
 
 import hashlib
 import logging
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -39,6 +40,7 @@ from gawah_contract import (
     PurchaseProposal,
 )
 
+from .config import card_problems, normalize_expiry
 from .db import connect, write_tx
 from .errors import GawahError
 from .ledger_service import LedgerService, format_ts, utcnow
@@ -64,6 +66,10 @@ class PaymentConfig:
     card_name: str = "Gawah Demo"
     buyer_email: str = ""
     buyer_password: str = ""
+    # Real mode: a missing or malformed card is an explicit CARD_NOT_CONFIGURED failure, never a
+    # silent switch to the browser-approval route.
+    require_card: bool = False
+    approver: Any = None  # tests inject the buyer-approval step; default is the headless browser
     transport: Any = None  # tests inject an httpx.MockTransport
 
     def __repr__(self) -> str:  # never print secrets, even by accident
@@ -73,12 +79,15 @@ class PaymentConfig:
     def configured(self) -> bool:
         return bool(self.client_id and self.client_secret)
 
+    def card_problems(self) -> list[str]:
+        return card_problems(self.card_number, self.card_expiry, self.card_cvv)
+
     def card(self) -> dict[str, str] | None:
         if not (self.card_number and self.card_expiry and self.card_cvv):
             return None
         return {
             "number": self.card_number,
-            "expiry": self.card_expiry,
+            "expiry": normalize_expiry(self.card_expiry) or self.card_expiry,
             "security_code": self.card_cvv,
             "name": self.card_name,
         }
@@ -112,7 +121,7 @@ def describe_error(exc: BaseException) -> str:
     """A short, safe reason: status, PayPal error name/issue codes and debug id. Never raw bodies."""
     if isinstance(exc, PayPalError):
         if exc.status == 0:
-            return str(exc)[:200]
+            return exc.message[:200]
         body = exc.body if isinstance(exc.body, dict) else {}
         issues = [str(d.get("issue")) for d in body.get("details", []) if isinstance(d, dict)]
         parts = [f"PayPal {exc.status}", str(body.get("name") or "")] + issues[:3]
@@ -122,6 +131,31 @@ def describe_error(exc: BaseException) -> str:
     if isinstance(exc, httpx.HTTPError):
         return "PayPal network error"
     return f"unexpected error: {type(exc).__name__}"
+
+
+_DIGIT_RUN = re.compile(r"\d{12,19}")
+
+
+def safe_error_summary(exc: BaseException) -> dict[str, Any]:
+    """A PayPal error reduced to what is safe to log: name, message, issue codes and fields.
+
+    Digit runs that could be card numbers are masked and everything is truncated. Request values,
+    headers and tokens are never included.
+    """
+    if not isinstance(exc, PayPalError):
+        return {"error": type(exc).__name__}
+    body = exc.body if isinstance(exc.body, dict) else {}
+
+    def clean(v: Any, n: int = 160) -> str:
+        return _DIGIT_RUN.sub("[masked]", str(v))[:n]
+
+    details = [
+        {"issue": clean(d.get("issue"), 60), "field": clean(d.get("field", ""), 80),
+         "description": clean(d.get("description", ""))}
+        for d in body.get("details", []) if isinstance(d, dict)
+    ][:5]
+    return {"status": exc.status, "name": clean(body.get("name", ""), 60),
+            "message": clean(exc.message), "debug_id": exc.debug_id, "details": details}
 
 
 def classify_order(order: dict[str, Any]) -> tuple[str, str | None, str | None]:
@@ -137,6 +171,12 @@ def classify_order(order: dict[str, Any]) -> tuple[str, str | None, str | None]:
                     return PENDING, cap["id"], None
                 return "FAILED", cap.get("id"), f"capture status {cs}"
         return PENDING, None, None  # completed but no capture visible yet: do not guess
+    if status == "PAYER_ACTION_REQUIRED":
+        why = (
+            "order not completed (status PAYER_ACTION_REQUIRED): the payer action "
+            "(buyer approval / 3D Secure) was required and not completed"
+        )
+        return "FAILED", None, why
     return "FAILED", None, f"order not completed (status {status})"
 
 
@@ -193,6 +233,7 @@ class PaymentService:
             idempotency_key=row["idempotency_key"],
             custom_id=row["custom_id"],
             created_at=row["created_at"],
+            failure_reason=row["failure_reason"],
         )
 
     def _row(self, payment_id: str) -> sqlite3.Row | None:
@@ -285,6 +326,12 @@ class PaymentService:
             raise GawahError(404, "PAYMENT_NOT_FOUND", f"No payment {payment_id}")
         if row["status"] != "RESERVED":
             return self.to_record(row)
+        if self.config.require_card:
+            problems = self.config.card_problems()
+            if problems:  # before any PayPal call
+                return self._finalize_failed(
+                    payment_id, "CARD_NOT_CONFIGURED: " + "; ".join(problems), 0,
+                    code="CARD_NOT_CONFIGURED")
         counter = {"n": 0}
 
         def remember_order(order: dict[str, Any]) -> None:
@@ -307,6 +354,7 @@ class PaymentService:
                 card=c.card(),
                 buyer_email=c.buyer_email,
                 buyer_password=c.buyer_password,
+                approver=c.approver,
                 on_order=remember_order,
             )
 
@@ -314,14 +362,19 @@ class PaymentService:
             order = self._retry(attempt, counter)
         except Exception as exc:  # noqa: BLE001  every failure must end in a defined state
             return self._after_failure(payment_id, exc, counter["n"])
-        return self._apply_order(payment_id, order, counter["n"])
+        return self._apply_order(
+            payment_id, order, counter["n"], debug_id=self.client().last_debug_id
+        )
 
     def _after_failure(self, payment_id: str, exc: Exception, attempts: int) -> PaymentRecord:
         reason = describe_error(exc)
+        debug_id = getattr(exc, "debug_id", None)
+        log.warning("payment %s: PayPal call failed after %d attempt(s): %s",
+                    payment_id, attempts, safe_error_summary(exc))
         row = self._row(payment_id)
         if row is not None and row["paypal_order_id"]:
             # The order exists: never guess. Ask PayPal what really happened.
-            return self.reconcile_one(payment_id, attempts=attempts, hint=reason)
+            return self.reconcile_one(payment_id, attempts=attempts, hint=reason, debug_id=debug_id)
         if isinstance(exc, httpx.TransportError):
             # No answer at all and no order id: PayPal may or may not have created (and even
             # captured) the order. Do not release the budget on a guess; hold it for review.
@@ -330,7 +383,7 @@ class PaymentService:
                 f"outcome unknown after {attempts} attempts ({reason}); check PayPal for this "
                 "payment's custom_id before releasing",
             )
-        return self._finalize_failed(payment_id, reason, attempts)
+        return self._finalize_failed(payment_id, reason, attempts, debug_id=debug_id)
 
     def _mark_unknown(self, payment_id: str, why: str) -> PaymentRecord:
         with write_tx(self.path) as conn:
@@ -341,12 +394,18 @@ class PaymentService:
             )
         return self.get(payment_id)
 
-    def _apply_order(self, payment_id: str, order: dict[str, Any], attempts: int) -> PaymentRecord:
+    def _apply_order(
+        self, payment_id: str, order: dict[str, Any], attempts: int,
+        hint: str | None = None, debug_id: str | None = None,
+    ) -> PaymentRecord:
         outcome, capture_id, reason = classify_order(order)
         if outcome == "PAID":
             return self._finalize_paid(payment_id, order, capture_id, attempts)
         if outcome == "FAILED":
-            return self._finalize_failed(payment_id, reason or "payment failed", attempts, order)
+            reason = reason or "payment failed"
+            if hint and hint not in reason:  # what went wrong on our side of the order
+                reason = f"{reason}: {hint}"
+            return self._finalize_failed(payment_id, reason, attempts, order, debug_id)
         with write_tx(self.path) as conn:  # PENDING: keep RESERVED, record what we know
             conn.execute(
                 "UPDATE payments SET paypal_order_id = ?, paypal_status = ?, attempts = ?,"
@@ -388,7 +447,8 @@ class PaymentService:
         return self.get(payment_id)
 
     def _finalize_failed(
-        self, payment_id: str, reason: str, attempts: int, order: dict[str, Any] | None = None
+        self, payment_id: str, reason: str, attempts: int, order: dict[str, Any] | None = None,
+        debug_id: str | None = None, code: str | None = None,
     ) -> PaymentRecord:
         with write_tx(self.path) as conn:
             row = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
@@ -412,14 +472,18 @@ class PaymentService:
                     "currency": row["currency"],
                     "reason": reason[:300],
                     "paypal_order_id": row["paypal_order_id"],
+                    "paypal_order_status": (order or {}).get("status") or row["paypal_status"],
+                    "paypal_debug_id": debug_id,
                     "custom_id": row["custom_id"],
+                    **({"code": code} if code else {}),
                 },
             )
         return self.get(payment_id)
 
     # ---- reconciliation ------------------------------------------------------------------
     def reconcile_one(
-        self, payment_id: str, attempts: int = 0, hint: str | None = None
+        self, payment_id: str, attempts: int = 0, hint: str | None = None,
+        debug_id: str | None = None,
     ) -> PaymentRecord:
         """Finalise a RESERVED payment from PayPal's real state (or fail it if no order exists)."""
         row = self._row(payment_id)
@@ -434,7 +498,9 @@ class PaymentService:
             order = self._retry(lambda: self.client().get_order(row["paypal_order_id"]), counter)
         except Exception as exc:  # noqa: BLE001  PayPal unreachable: stay RESERVED, retry later
             return self._mark_unknown(payment_id, f"outcome unknown: {hint or describe_error(exc)}")
-        return self._apply_order(payment_id, order, attempts)
+        return self._apply_order(
+            payment_id, order, attempts, hint=hint, debug_id=debug_id or self.client().last_debug_id
+        )
 
     def reconcile(self) -> dict[str, int]:
         """Startup recovery: settle every payment a crash left in RESERVED."""

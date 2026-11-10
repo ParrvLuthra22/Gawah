@@ -10,10 +10,12 @@ from gawah_contract import LedgerEntryType, PaymentStatus, ReasonCode, Verdict
 from gawah_engine.db import connect
 from gawah_engine.errors import GawahError
 from gawah_engine.payments import (
+    PaymentConfig,
     classify_order,
     describe_error,
     idempotency_key,
     make_custom_id,
+    safe_error_summary,
 )
 from gawah_engine.paypal import PayPalError
 from paypal_fake import Crash
@@ -595,3 +597,84 @@ def test_ledger_chain_check_fails_when_an_entry_is_edited(pw):
     c = {x.name: x for x in v.checks}
     assert not c["ledger_chain"].ok and v.first_broken_seq == seq
     assert c["mandate_signature"].ok and c["cart_signature"].ok
+
+
+# --- PAYER_ACTION_REQUIRED: approve headlessly, or fail with an explicit reason -----------------
+
+BUYER = {"buyer_email": "buyer@example.test", "buyer_password": "not-a-real-password"}
+
+
+def _wallet_world(tmp_path, clock, paypal, approver):
+    """Services with no card configured (the PayPal-wallet route) and an injected approver."""
+    cfg = PaymentConfig(client_id="x", client_secret="y", transport=paypal.transport,
+                        approver=approver, **BUYER)
+    return World(build_services(tmp_path, clock, payment_config=cfg), clock)
+
+
+def test_payer_action_required_is_approved_headlessly_then_captured(tmp_path, clock, paypal):
+    paypal.create_status = "PAYER_ACTION_REQUIRED"
+    links = []
+
+    def approver(link, email, password):  # stands in for the headless buyer login (SIMULATED)
+        links.append(link)
+        paypal.approved.add(link.rsplit("=", 1)[1])
+
+    w = _wallet_world(tmp_path, clock, paypal, approver)
+    pay = w.svc.guardian.submit(w.proposal()).payment
+    assert pay.status == PaymentStatus.PAID and pay.failure_reason is None
+    assert len(links) == 1 and "checkoutnow?token=" in links[0]
+    assert len(paypal.calls("capture")) == 1
+    assert types(w)[-2:] == ["PAYMENT_STARTED", "PAYMENT_COMPLETED"]
+    assert budget(w) == (6500, 0, 1500)
+
+
+def test_unrecoverable_payer_action_ends_failed_with_an_explicit_reason(tmp_path, clock, paypal):
+    paypal.create_status = "PAYER_ACTION_REQUIRED"
+
+    def approver(link, email, password):
+        raise RuntimeError("BrowserType.launch: Executable doesn't exist\nlong banner")
+
+    w = _wallet_world(tmp_path, clock, paypal, approver)
+    pay = w.svc.guardian.submit(w.proposal()).payment
+    assert pay.status == PaymentStatus.FAILED
+    reason = pay.failure_reason
+    assert "PAYER_ACTION_REQUIRED" in reason and "headless buyer approval failed" in reason
+    assert "Executable doesn't exist" in reason and "banner" not in reason  # first line only
+    assert budget(w) == (0, 0, 8000)  # reservation released
+    assert types(w)[-2:] == ["PAYMENT_STARTED", "PAYMENT_FAILED"]
+    failed = w.entries(type=T.PAYMENT_FAILED)[0]
+    assert failed.data["reason"] == reason
+    assert failed.data["paypal_order_status"] == "PAYER_ACTION_REQUIRED"
+    assert failed.data["paypal_debug_id"] == "dbg-fake-ok"  # PayPal's debug id is kept
+    assert failed.data["paypal_order_id"] == pay.paypal_order_id
+    assert w.svc.ledger.verify()["ok"]
+
+
+def test_card_that_needs_3d_secure_fails_explicitly_without_a_blind_capture(pw, paypal):
+    paypal.create_status = "PAYER_ACTION_REQUIRED"  # card route + a challenge
+    pay = pw.svc.guardian.submit(pw.proposal()).payment
+    assert pay.status == PaymentStatus.FAILED
+    assert "3D Secure" in pay.failure_reason and "PAYER_ACTION_REQUIRED" in pay.failure_reason
+    assert paypal.calls("capture") == []
+    assert budget(pw) == (0, 0, 8000)
+    assert types(pw)[-2:] == ["PAYMENT_STARTED", "PAYMENT_FAILED"]
+    assert pw.entries(type=T.PAYMENT_FAILED)[0].data["paypal_order_status"] == "PAYER_ACTION_REQUIRED"
+
+
+def test_safe_error_summary_masks_card_numbers_and_drops_values():
+    err = PayPalError(422, {"name": "UNPROCESSABLE_ENTITY", "message": "bad card 4005519200000004",
+                            "details": [{"issue": "INVALID_NUMBER", "field": "/payment_source/card/number",
+                                         "value": "4005519200000004", "description": "4005519200000004 no"}]},
+                      "dbg9")
+    out = str(safe_error_summary(err))
+    assert "4005519200000004" not in out and "value" not in out and "dbg9" in out
+    assert "INVALID_NUMBER" in out and "/payment_source/card/number" in out
+
+
+def test_failure_reason_is_logged_without_card_data(pw, paypal, caplog):
+    caplog.set_level("DEBUG")
+    paypal.fail("create", 422)
+    pw.svc.guardian.submit(pw.proposal())
+    text = caplog.text
+    assert "dbg-injected" in text and "INSTRUMENT_DECLINED" in text
+    assert TEST_CARD["number"] not in text and TEST_CARD["security_code"] not in text

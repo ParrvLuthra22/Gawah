@@ -33,7 +33,9 @@ MATRIX = [
     ("GET", "/v1/ledger/stream?limit=1&max_seconds=1", "/v1/ledger/stream", {S3}),
     ("GET", "/v1/evidence/pay_x", "/v1/evidence/{payment_id}", {S3}),
 ]
-OPEN_ROUTES = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+# /v1/admin/reset-demo is outside the service scopes on purpose: it has its own X-Admin-Key check
+# and only works with GAWAH_ENV=demo (tests in test_demo_admin.py).
+OPEN_ROUTES = {"/v1/admin/reset-demo", "/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
 KEYS = {"none": None, "wrong": "not-a-key", S1: KEY_S1, S3: KEY_S3}
 
 

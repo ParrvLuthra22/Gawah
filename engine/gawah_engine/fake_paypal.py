@@ -30,6 +30,7 @@ class FakePayPal:
         self._ids = itertools.count(1)
         self.create_status = "COMPLETED"  # "CREATED" makes the engine call capture separately
         self.failures: dict[str, list] = {}  # endpoint -> queue of failures to inject
+        self.approved: set[str] = set()  # order ids the (simulated) buyer has approved
         self.hooks: list = []  # called (outside the fake's lock) at the start of every API call
         self.transport = httpx.MockTransport(self)
 
@@ -44,6 +45,12 @@ class FakePayPal:
 
     # ---- the transport --------------------------------------------------------------------
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        response = self._dispatch(request)
+        if response.status_code < 400:  # like PayPal: every answer carries a debug id header
+            response.headers.setdefault("paypal-debug-id", "dbg-fake-ok")
+        return response
+
+    def _dispatch(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
         if path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": "fake-token", "expires_in": 32400})
@@ -99,6 +106,9 @@ class FakePayPal:
                 "purchase_units": [{"custom_id": pu.get("custom_id"), "amount": pu["amount"],
                                     "payments": {}}],
             }
+            if self.create_status == "PAYER_ACTION_REQUIRED":
+                order["links"] = [{"rel": "payer-action",
+                                   "href": f"https://fake.sandbox.paypal.test/checkoutnow?token={oid}"}]
             if self.create_status == "COMPLETED":
                 self._capture(order)
             self.orders[oid] = order
@@ -106,6 +116,10 @@ class FakePayPal:
         if endpoint == "capture":
             oid = re.search(r"/orders/([^/]+)/capture", path).group(1)
             order = self.orders[oid]
+            if order["status"] == "PAYER_ACTION_REQUIRED" and oid not in self.approved:
+                return httpx.Response(422, json={
+                    "name": "UNPROCESSABLE_ENTITY", "message": "not approved",
+                    "debug_id": "dbg-not-approved", "details": [{"issue": "ORDER_NOT_APPROVED"}]})
             if order["status"] != "COMPLETED":
                 self._capture(order)
             return httpx.Response(201, json=order)
