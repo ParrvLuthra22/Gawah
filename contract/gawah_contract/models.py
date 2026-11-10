@@ -119,6 +119,11 @@ class PaymentRecord(_Model):
     idempotency_key: str
     custom_id: str = Field(description="Ledger reference attached to the PayPal order")
     created_at: datetime
+    failure_reason: str | None = Field(
+        default=None,
+        description="Why the payment FAILED (or is held unresolved): PayPal status/issue codes and"
+        " debug id. Never contains card data. Null for PAID payments.",
+    )
 
 
 class LedgerEntry(_Model):
