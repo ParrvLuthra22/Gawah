@@ -21,5 +21,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV_FILE,
         env_file_encoding="utf-8",
+        # The shared template deliberately leaves the Guardian's GROQ_MODEL blank;
+        # treat that as unset so System 1 retains its safe automatic selection default.
+        env_ignore_empty=True,
         extra="ignore",
     )
