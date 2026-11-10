@@ -1,11 +1,10 @@
 from types import SimpleNamespace
 
+from counsel import demo
+from counsel.models import Base, Dispute, Source
 from gawah_contract import PaymentRecord
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-
-from counsel import demo
-from counsel.models import Base, Dispute, Source
 
 
 def payment(id: str) -> PaymentRecord:

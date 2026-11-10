@@ -5,15 +5,14 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import resolution_workflow
 from .clients import IntegrationError, System2Client
 from .counsel_service import analyze
 from .evidence import assemble_pack
 from .groq_counsel import GroqCounsel
 from .models import Dispute, DisputeStatusHistory, Source, now
 from .resolution_auth import Actor
-from . import resolution_workflow
 from .resolution_schemas import OpenWorkflow
-
 
 SCENARIOS = (("DEFEND", "ITEM_NOT_RECEIVED"), ("CONCEDE", "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"))
 
