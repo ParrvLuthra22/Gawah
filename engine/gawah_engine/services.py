@@ -74,6 +74,21 @@ def check_fake_paypal_allowed() -> None:
         raise RuntimeError("GAWAH_FAKE_PAYPAL=1 is refused unless GAWAH_ENV=test")
 
 
+def check_card_config() -> None:
+    """Real mode with PayPal credentials: a missing or malformed PAYPAL_CARD_* stops the engine at
+    startup with a message naming the variable (never its value)."""
+    if settings.gawah_mock or settings.gawah_fake_paypal:
+        return
+    if not (settings.paypal_client_id and settings.paypal_client_secret):
+        return  # no PayPal credentials: no payment can be attempted anyway
+    problems = settings.card_problems()
+    if problems:
+        raise RuntimeError(
+            "PayPal sandbox card is not configured correctly: " + "; ".join(problems)
+            + ". Set PAYPAL_CARD_NUMBER, PAYPAL_CARD_EXPIRY (MM/YYYY, MM/YY or YYYY-MM) and "
+            "PAYPAL_CARD_CVV.")
+
+
 def payment_config_from_settings() -> PaymentConfig:
     global _fake_paypal
     check_fake_paypal_allowed()
@@ -94,6 +109,7 @@ def payment_config_from_settings() -> PaymentConfig:
         card_expiry=settings.paypal_card_expiry,
         card_cvv=settings.paypal_card_cvv,
         card_name=settings.paypal_card_name,
+        require_card=not settings.gawah_mock,  # real mode: no silent browser-approval fallback
         buyer_email=settings.buyer_email,
         buyer_password=settings.buyer_password,
         transport=paypal_transport_override,

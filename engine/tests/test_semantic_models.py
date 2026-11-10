@@ -124,7 +124,8 @@ def test_health_reports_the_last_real_outcome(tmp_path, monkeypatch):
         live = SemanticChecker(sem.path, client=fake, models=["m-missing", "m-good"])
         get_services().guardian.semantic = live
         assert client.get("/health").json() == {
-            "status": "ok", "service": "gawah", "semantic": "groq", "model": "m-missing"}
+            "status": "ok", "service": "gawah", "env": "dev", "mock": False, "paypal": "sandbox", "card_configured": False,
+            "semantic": "groq", "model": "m-missing"}
         check(live)
         assert client.get("/health").json()["model"] == "m-good"
         fake.by_model["m-good"] = httpx.ReadTimeout("down")

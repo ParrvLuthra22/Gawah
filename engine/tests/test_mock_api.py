@@ -20,8 +20,9 @@ client = TestClient(app)
 
 
 def test_health_needs_no_key():
-    assert client.get("/health").json() == {
-        "status": "ok", "service": "gawah", "semantic": "fallback", "model": None}
+    h = client.get("/health").json()
+    assert h["status"] == "ok" and h["service"] == "gawah" and h["mock"] is True
+    assert (h["semantic"], h["model"], h["paypal"]) == ("fallback", None, "sandbox")
 
 
 def test_missing_or_bad_key_is_401_with_error_envelope():

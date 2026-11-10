@@ -63,7 +63,9 @@ Shapes are identical to the mock; only behaviour differs. Everything is real (SQ
 1. `PROPOSAL_RECEIVED` is committed.
 2. Under a per-mandate lock and one SQLite write transaction: evaluate the rules against the *current* mandate status and budget (remaining already subtracts reservations), write `DECISION_MADE`, and, on ALLOW, reserve the amount, create the payment as `RESERVED` and append `PAYMENT_STARTED`. Concurrent proposals for one mandate are serialised here, so two $65 proposals against an $80 mandate give exactly one ALLOW and one `OVER_BUDGET`. A revoke that lands before this step blocks the payment (`MANDATE_REVOKED`).
 3. After the lock is released, PayPal is called: create the order with `custom_id = gawah:{proposal_id}:{ledger_seq}` (`ledger_seq` is the `PAYMENT_STARTED` entry, so PayPal's record points back to our ledger) and `PayPal-Request-Id = idem-{proposal_id}`, then pay it with the buyer card from the engine's environment. The order id is stored as soon as it exists, the capture id after capture.
-4. Success: `PAID`, reservation committed (moves to `spent`), `PAYMENT_COMPLETED` with `paypal_order_id`, `paypal_capture_id`, `custom_id`. Failure: `FAILED`, reservation released, `PAYMENT_FAILED` with a safe reason (HTTP status, PayPal error name and issue codes, `debug_id`; never raw bodies or card data).
+4. Success: `PAID`, reservation committed (moves to `spent`), `PAYMENT_COMPLETED` with `paypal_order_id`, `paypal_capture_id`, `custom_id`. Failure: `FAILED`, reservation released, `PAYMENT_FAILED` with a safe reason (HTTP status, PayPal error name and issue codes, `debug_id`; never raw bodies or card data). `PAYMENT_FAILED` data also carries `paypal_order_status` and `paypal_debug_id` (PayPal's `PayPal-Debug-Id`, when known), and the same reason is returned as `failure_reason` on the payment record.
+
+**How the buyer pays, and `PAYER_ACTION_REQUIRED`.** With `PAYPAL_CARD_*` set the engine pays by card (`payment_source.card`, one call; the sandbox test card completes with no challenge). Without a card it creates a PayPal-wallet order, which PayPal always returns as `PAYER_ACTION_REQUIRED` with a `payer-action` link; the engine then drives that link with a headless browser logged in as `BUYER_EMAIL` (needs `playwright install chromium`) and captures. If a card order comes back `PAYER_ACTION_REQUIRED` (a 3D Secure challenge) it is **not** completed headlessly; the payment ends `FAILED` with an explicit reason. Any failure to approve ends `FAILED` with the cause in `failure_reason` instead of a bare order status.
 
 BLOCK means no reservation, no PayPal call and `payment: null`. Sending the same proposal `id` again returns the stored decision and payment; the database allows one payment per proposal (`proposal_id` is unique).
 
@@ -100,7 +102,11 @@ Applied before any logic runs; violations are `422 VALIDATION_ERROR` with `detai
 
 ## Health
 
-`GET /health` returns `{"status","service","semantic": "groq" | "fallback", "model": <name or null>}` where `semantic` is the **last real outcome** of the category check: `groq` when a model answered (and which), `fallback` when the keyword matcher did (no key, every model not found, timeout or rate limit). Mock mode always reports `fallback`. Models: `GROQ_MODEL` (default `openai/gpt-oss-20b`) then `GROQ_MODELS` (default `openai/gpt-oss-20b,openai/gpt-oss-120b`); a 404 logs one warning, drops that model for this process and tries the next.
+`GET /health` returns `{"status","service","env","mock","paypal":"sandbox","card_configured":bool,"semantic": "groq" | "fallback", "model": <name or null>}` where `semantic` is the **last real outcome** of the category check: `groq` when a model answered (and which), `fallback` when the keyword matcher did (no key, every model not found, timeout or rate limit). Mock mode always reports `fallback`. Models: `GROQ_MODEL` (default `openai/gpt-oss-20b`) then `GROQ_MODELS` (default `openai/gpt-oss-20b,openai/gpt-oss-120b`); a 404 logs one warning, drops that model for this process and tries the next.
+
+## Payment failure reason (additive)
+
+- `PaymentRecord.failure_reason: string | null` (default null): why a payment is `FAILED` (or held `RESERVED`). Safe text only. Regenerate with `make contract`.
 
 ## Contract changes in this pass (all additive)
 
@@ -129,7 +135,7 @@ What is signed: canonical JSON (sorted keys, no whitespace, ASCII-escaped) of th
 - **SignedCart** (made and signed by the store): `{"cart_id":"cart_01","merchant_id":"demo-shoe-store","line_items":[{"sku":"SHOE-BLK-RUN","title":"Black Runner","variant":"size 9","quantity":1,"unit_price_minor":6500}],"total_minor":6500,"currency":"USD","expires_at":"...","signature":"...","key_id":"demo-shoe-store-key-1"}`
 - **PurchaseProposal** (System 1 sends): `id, mandate_id, agent_id, merchant_id, product{id,title,url}, quantity, unit_price_minor, currency, rationale, signed_cart, created_at`. See `contract/fixtures/proposal_shoes.json`.
 - **GuardianDecision**: `{"id":"dec_02","proposal_id":"prop_02","verdict":"BLOCK","reasons":["OVER_BUDGET"],"explanation":"...","checked_at":"..."}`. Reason codes: OVER_BUDGET, MERCHANT_NOT_ALLOWED, CART_SIGNATURE_INVALID, MANDATE_EXPIRED, MANDATE_REVOKED, CURRENCY_MISMATCH, CATEGORY_MISMATCH, DUPLICATE, PRICE_MISMATCH, MANDATE_SIGNATURE_INVALID, CART_EXPIRED, MERCHANT_MISMATCH, MERCHANT_NOT_REGISTERED (the last four were added later; the mock never returns them).
-- **PaymentRecord**: `{"id":"pay_01","proposal_id":"prop_01","decision_id":"dec_01","paypal_order_id":"FAKEORDER5O1234567","paypal_capture_id":"...","status":"PAID","amount_minor":6500,"currency":"USD","idempotency_key":"idem-prop_01","custom_id":"gawah:prop_01","created_at":"..."}` (status: RESERVED, PAID, FAILED, REFUNDED)
+- **PaymentRecord**: `{"id":"pay_01","proposal_id":"prop_01","decision_id":"dec_01","paypal_order_id":"FAKEORDER5O1234567","paypal_capture_id":"...","status":"PAID","amount_minor":6500,"currency":"USD","idempotency_key":"idem-prop_01","custom_id":"gawah:prop_01","created_at":"...","failure_reason":null}` (status: RESERVED, PAID, FAILED, REFUNDED)
 - **LedgerEntry**: `{"seq":3,"ts":"...","type":"DECISION_MADE","subject_id":"dec_01","data":{...},"prev_hash":"<64 hex>","hash":"<64 hex>","signature":"...","key_id":"..."}`. Hash is sha256 of canonical JSON of seq, ts, type, subject_id, data, prev_hash; helper `gawah_contract.hashing.verify_chain`.
 - **DisputeCase**: `{"id":"dsp_02","paypal_dispute_id":"PP-D-FAKE-1002","payment_id":"pay_04","status":"OPEN","reason":"MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED","amount_minor":6500,"currency":"USD","opened_at":"...","source":"simulated"}` (source: paypal_sandbox or simulated)
 
@@ -152,7 +158,7 @@ All examples assume `H='X-Gawah-Key: yourkey'` and `B=http://localhost:8000`.
 | `GET /v1/ledger/head`, `GET /v1/ledger/stream` | Signed head of the ledger / live Server-Sent Events feed (see Live feed) |
 | `GET /v1/evidence/{payment_id}` | Full bundle for Dispute Counsel: mandate, proposal, signed cart, decision, payment, ledger entries, verification |
 | `POST /v1/merchants`, `GET /v1/merchants/{id}/public-key` | Register / fetch a store's public key (`MerchantKey`) |
-| `GET /health` | `{"status":"ok","service":"gawah","semantic":"groq"\|"fallback","model":...}` |
+| `GET /health` | `{"status":"ok","service":"gawah","env":"dev"\|"demo"\|"test","mock":bool,"paypal":"sandbox","card_configured":bool,"semantic":"groq"\|"fallback","model":...}` |
 
 ```sh
 curl -X POST $B/v1/proposals -H "$H" -H 'Content-Type: application/json' -d @contract/fixtures/proposal_shoes.json
@@ -168,3 +174,16 @@ curl $B/v1/evidence/pay_04 -H "$H"
 curl -X POST $B/v1/merchants -H "$H" -H 'Content-Type: application/json' -d '{"merchant_id":"demo-shoe-store","key_id":"k1","alg":"ed25519","public_key_pem":"-----BEGIN PUBLIC KEY-----..."}'
 curl $B/v1/merchants/demo-shoe-store/public-key -H "$H"
 ```
+
+## Hosted demo additions (additive; no contract model changed)
+
+- `GET /health` gains `env` (`GAWAH_ENV`, `"dev"` when unset), `mock` (bool) and `paypal` (always `"sandbox"`).
+- `POST /v1/admin/reset-demo`, header `X-Admin-Key` (= `ADMIN_KEY`). Not in any service scope. `403 ADMIN_DISABLED` unless `GAWAH_ENV=demo`; `401 UNAUTHORIZED` for a missing or wrong key (also when `ADMIN_KEY` is unset); `429` after 10 attempts a minute; `409 MOCK_MODE` in mock mode. On success deletes the database and signing keys, bootstraps again and returns `{"status":"reset","ledger_head_seq":0,"ledger_key_id","mandate_key_id","merchant_id"}`. Single engine process only.
+- `GAWAH_BOOTSTRAP=1`: on start, if the database has no ledger entries and no mandates, create the schema, the ledger and mandate signing keys, and the `demo-shoe-store` merchant key (private key stays in the key directory, public key is registered). Nothing else is seeded. A database that has data but lacks its signing keys stops the engine instead of minting new keys.
+- `ENGINE_CORS_ORIGINS`: comma-separated allowed browser origins (default `http://localhost:3000`).
+
+## Sandbox card configuration (additive)
+
+- `PAYPAL_CARD_EXPIRY` accepts `MM/YYYY`, `MM/YY` or `YYYY-MM` and is normalised to `YYYY-MM` (what PayPal receives). Other formats are rejected.
+- Real mode (`GAWAH_MOCK=0`) with PayPal credentials set: a missing or malformed `PAYPAL_CARD_NUMBER`, `_EXPIRY` or `_CVV` stops the engine at startup (message names the variable, never a value). If it slips through, the payment ends `FAILED` with reason `CARD_NOT_CONFIGURED: ...` before any PayPal call, the budget is released, and the `PAYMENT_FAILED` ledger data carries `"code": "CARD_NOT_CONFIGURED"` (new optional key, only on this failure). The browser-approval route is then used only after PayPal says the card route is not enabled for the account, never because the card is missing.
+- `GET /health` gains `card_configured` (bool only).

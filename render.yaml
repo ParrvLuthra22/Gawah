@@ -1,0 +1,121 @@
+# Render Blueprint for the hosted Gawah demo. Free plan: the filesystem is EPHEMERAL (databases,
+# keys and the ledger reset on every restart or redeploy) and instances sleep when idle.
+# Secrets are `sync: false`: Render asks for them in the dashboard and they never enter the repo.
+# Step by step: docs/DEPLOY.md.
+
+services:
+  # ---- System 2: engine (mandates, Guardian, PayPal sandbox payments, signed ledger) ----------
+  - type: web
+    name: gawah-engine
+    runtime: python
+    plan: free
+    buildCommand: pip install uv && uv sync --frozen
+    startCommand: .venv/bin/python -m uvicorn gawah_engine.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: GAWAH_MOCK
+        value: "0"
+      - key: GAWAH_ENV
+        value: demo
+      - key: GAWAH_BOOTSTRAP        # empty database on start -> schema, keys, demo merchant
+        value: "1"
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: RATE_LIMIT_PER_MINUTE  # the dashboard polls; the local default of 60 is too tight
+        value: "300"
+      # secrets and per-deploy values: enter in the dashboard
+      - key: SYSTEM1_KEY
+        sync: false
+      - key: SYSTEM3_KEY
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: ENGINE_CORS_ORIGINS    # the gawah-web URL, no trailing slash
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_CARD_NUMBER     # PayPal sandbox test card, used by the card payment route
+        sync: false
+      - key: PAYPAL_CARD_EXPIRY     # YYYY-MM
+        sync: false
+      - key: PAYPAL_CARD_CVV
+        sync: false
+      - key: PAYPAL_CARD_NAME
+        sync: false
+      - key: BUYER_EMAIL            # optional: sandbox buyer for the browser-approval route
+        sync: false
+      - key: BUYER_PASSWORD
+        sync: false
+      - key: GROQ_API_KEY           # optional: without it the Guardian uses its keyword fallback
+        sync: false
+      - key: CHANNEL3_API_KEY       # optional
+        sync: false
+
+  # ---- System 3: Counsel API (dispute evidence and AI counsel) -------------------------------
+  - type: web
+    name: gawah-counsel
+    runtime: python
+    plan: free
+    buildCommand: pip install -r system3/requirements.txt ./contract
+    startCommand: bash scripts/start_counsel.sh   # alembic upgrade head, then uvicorn on $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ENABLE_SANDBOX_RESOLUTION
+        value: "false"
+      # DATABASE_URL is left unset: SQLite on the ephemeral disk (system3/counsel.db).
+      # secrets and per-deploy values: enter in the dashboard
+      - key: SYSTEM2_BASE_URL       # the gawah-engine URL
+        sync: false
+      - key: SYSTEM2_KEY            # = the engine's SYSTEM3_KEY (blank: Counsel reuses SYSTEM3_KEY)
+        sync: false
+      - key: SYSTEM3_KEY            # incoming key; same value as the web service's SYSTEM3_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID       # sandbox app with Customer disputes enabled
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
+  # ---- Web: Next.js dashboard. Its server adds SYSTEM3_KEY; the browser never sees a key ------
+  - type: web
+    name: gawah-web
+    runtime: node
+    plan: free
+    buildCommand: cd web && npm ci && npm run build
+    # `npm start` binds 127.0.0.1 (web/package.json), which Render cannot reach: bind 0.0.0.0.
+    startCommand: cd web && npx next start --hostname 0.0.0.0 --port $PORT
+    healthCheckPath: /            # redirects to the app (3xx counts as healthy); needs no backend
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.2
+      - key: SYSTEM3_API_URL        # the gawah-counsel URL
+        sync: false
+      - key: SYSTEM3_KEY            # server-side only. Never a NEXT_PUBLIC_ variable.
+        sync: false
+
+  # ---- System 1: shopper agent (DISABLED until Suvir's code is merged and runs) --------------
+  # - type: web
+  #   name: gawah-shopper
+  #   runtime: python
+  #   plan: free
+  #   buildCommand: <fill in from system1/README once merged>
+  #   startCommand: <fill in; must listen on 0.0.0.0:$PORT>
+  #   healthCheckPath: /health
+  #   envVars:
+  #     - key: PYTHON_VERSION
+  #       value: 3.12.8
+  #     - key: ENGINE_URL           # the gawah-engine URL
+  #       sync: false
+  #     - key: SYSTEM1_KEY          # same value as the engine's SYSTEM1_KEY. No payment keys.
+  #       sync: false
+  #     - key: GROQ_API_KEY
+  #       sync: false
+  #     - key: CHANNEL3_API_KEY
+  #       sync: false

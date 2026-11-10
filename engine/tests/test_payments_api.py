@@ -66,3 +66,14 @@ def test_no_secret_in_any_response(api):
     ]
     for t in texts:
         assert TEST_CARD["number"] not in t  # (a 3-digit cvv would match hashes by chance)
+
+
+def test_get_payment_includes_failure_reason(api, use_fake_paypal):
+    ok = _pay(api)
+    assert api.get(f"/v1/payments/{ok['id']}", headers=H).json()["failure_reason"] is None
+    use_fake_paypal.fail("create", 422)
+    bad = _pay(api, unit=1000)
+    got = api.get(f"/v1/payments/{bad['id']}", headers=H).json()
+    assert got["status"] == "FAILED" and "INSTRUMENT_DECLINED" in got["failure_reason"]
+    assert PaymentRecord.model_validate(got).failure_reason == got["failure_reason"]
+    assert TEST_CARD["number"] not in str(got)

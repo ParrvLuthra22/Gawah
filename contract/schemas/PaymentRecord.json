@@ -38,6 +38,19 @@
       "title": "Decision Id",
       "type": "string"
     },
+    "failure_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Why the payment FAILED (or is held unresolved): PayPal status/issue codes and debug id. Never contains card data. Null for PAID payments.",
+      "title": "Failure Reason"
+    },
     "id": {
       "title": "Id",
       "type": "string"
