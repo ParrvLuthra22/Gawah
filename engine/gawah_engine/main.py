@@ -6,10 +6,11 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_service_key
-from .config import settings
+from .bootstrap import bootstrap_if_empty
+from .config import cors_origins, settings
 from .errors import install_error_handlers
 from .harden import BodyLimitMiddleware
-from .routers import ledger, mandates, merchants, payments, proposals
+from .routers import admin, ledger, mandates, merchants, payments, proposals
 from .services import check_fake_paypal_allowed, get_services
 
 
@@ -17,6 +18,8 @@ from .services import check_fake_paypal_allowed, get_services
 async def lifespan(_: FastAPI):
     check_fake_paypal_allowed()
     if not settings.gawah_mock:
+        if settings.gawah_bootstrap:
+            bootstrap_if_empty()
         # create the database, run migrations, create signing keys, then settle any payment
         # a crash left in RESERVED (reads PayPal; never guesses)
         get_services().payments.reconcile()
@@ -27,7 +30,7 @@ app = FastAPI(title="Gawah engine (System 2)", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins(settings.engine_cors_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -53,10 +56,19 @@ for r in (
     app.include_router(r, dependencies=[Depends(require_service_key)])
 
 
+# The admin route has its own X-Admin-Key check (and only exists in effect when GAWAH_ENV=demo),
+# so it is not under the per-service scopes.
+app.include_router(admin.router)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
-    """Liveness plus the semantic check's LAST REAL outcome, so a silent fallback is visible."""
-    base: dict[str, Any] = {"status": "ok", "service": "gawah"}
+    """Liveness, the environment, and the semantic check's LAST REAL outcome (a silent fallback
+    is visible). `mock` is true when /v1 serves fixtures; `paypal` is always the sandbox."""
+    base: dict[str, Any] = {
+        "status": "ok", "service": "gawah",
+        "env": settings.gawah_env or "dev", "mock": settings.gawah_mock, "paypal": "sandbox",
+    }
     if settings.gawah_mock:
         return {**base, "semantic": "fallback", "model": None}  # mock mode never calls a model
     st = get_services().guardian.semantic.status()

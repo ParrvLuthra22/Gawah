@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     gawah_fake_paypal: bool = False
     # When true (default), /v1 endpoints return fixtures instead of running real logic.
     gawah_mock: bool = True
+    # Hosted demo. GAWAH_BOOTSTRAP=1: on start, if the database is empty, create the schema, the
+    # signing keys and the demo merchant (nothing else is seeded). GAWAH_ENV=demo + ADMIN_KEY
+    # enable POST /v1/admin/reset-demo (wipes the data and the keys, starts a new ledger).
+    gawah_bootstrap: bool = False
+    admin_key: str = ""
+    # Comma-separated browser origins allowed by CORS (the web app calls Counsel through its own
+    # server, so this only matters for direct browser calls to the engine).
+    engine_cors_origins: str = "http://localhost:3000"
+
+
+def cors_origins(value: str) -> list[str]:
+    """`"https://a.example, https://b.example/"` -> the origins, trimmed, without trailing slash."""
+    return [o.strip().rstrip("/") for o in value.split(",") if o.strip()]
 
 
 settings = Settings()
