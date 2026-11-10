@@ -164,7 +164,10 @@ function EvidenceReference({ paymentId, disputeId, version }: {
   const evidence = useQuery({ queryKey, queryFn: ({ signal }) => loadEvidence(base + savedScope, signal) });
   const assemble = useMutation({
     mutationFn: () => api<EvidencePack>(`${base}/assemble${scope}`, { method: "POST" }),
-    onSuccess: pack => queryClient.setQueryData(queryKey, pack),
+    onSuccess: pack => {
+      queryClient.setQueryData(queryKey, pack);
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
   return (
     <>

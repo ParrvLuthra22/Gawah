@@ -13,10 +13,21 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from . import command_dashboard, resolution_submission, resolution_workflow
 from .clients import IntegrationError, PayPalClient, System2Client
+from .command_schemas import (
+    ActivityFeed,
+    CaseFilters,
+    CasePage,
+    CounselStats,
+    EvidenceStats,
+    Overview,
+    Period,
+)
 from .config import Settings
 from .counsel_schemas import CounselAnalysisResponse
 from .counsel_service import analyze, get_analysis, get_history
+from .dashboard import router as dashboard_router
 from .evidence import PaymentReference, assemble_pack, get_pack
 from .evidence_schemas import (
     EvidenceIssues,
@@ -25,7 +36,19 @@ from .evidence_schemas import (
     VerificationSummary,
 )
 from .groq_counsel import GROQ_BASE_URL, GroqCounsel
-from .models import Dispute, DisputeStatusHistory, DisputeSyncLog, Source
+from .models import Dispute, DisputeStatusHistory, DisputeSyncLog, ResolutionWorkflow, Source
+from .resolution import Action, ResolutionOptions, get_options
+from .resolution_auth import Actor, authenticate
+from .resolution_schemas import (
+    OpenWorkflow,
+    QueueFilters,
+    ResolutionStats,
+    Review,
+    Revision,
+    SubmitWorkflow,
+    WorkflowDetail,
+    WorkflowRow,
+)
 from .schemas import (
     DisputeDetail,
     DisputeFilters,
@@ -67,7 +90,98 @@ def error_response(
 
 
 DB = Annotated[Session, Depends(database)]
+ResolutionActor = Annotated[Actor, Depends(authenticate)]
+WorkflowId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 router = APIRouter(prefix="/api", dependencies=[Depends(require_service_key)])
+router.include_router(dashboard_router)
+
+
+@router.get("/dashboard/overview", response_model=Overview)
+def dashboard_overview(db: DB, filters: Annotated[Period, Query()]):
+    return command_dashboard.overview(db, filters)
+
+
+@router.get("/dashboard/cases", response_model=CasePage)
+def dashboard_cases(db: DB, filters: Annotated[CaseFilters, Query()]):
+    return command_dashboard.cases(db, filters)
+
+
+@router.get("/dashboard/evidence", response_model=EvidenceStats)
+def dashboard_evidence(db: DB, filters: Annotated[Period, Query()]):
+    return command_dashboard.evidence_stats(db, filters)
+
+
+@router.get("/dashboard/counsel", response_model=CounselStats)
+def dashboard_counsel(db: DB, filters: Annotated[Period, Query()]):
+    return command_dashboard.counsel_stats(db, filters)
+
+
+@router.get("/dashboard/activity", response_model=ActivityFeed)
+def dashboard_activity(db: DB, filters: Annotated[Period, Query()]):
+    return command_dashboard.activity(db, filters)
+
+
+@router.get("/dashboard/resolution", response_model=ResolutionStats)
+def dashboard_resolution(db: DB, filters: Annotated[Period, Query()]):
+    return resolution_workflow.statistics(
+        db, *command_dashboard.period_conditions(filters, ResolutionWorkflow.created_at)
+    )
+
+
+@router.get("/resolution/actor", response_model=Actor)
+def resolution_actor(actor: ResolutionActor):
+    return actor
+
+
+@router.get("/resolution/overview", response_model=ResolutionStats)
+def resolution_overview(db: DB, actor: ResolutionActor):
+    return resolution_workflow.statistics(db)
+
+
+@router.get("/resolution/workflows", response_model=Page[WorkflowRow])
+def resolution_queue(db: DB, actor: ResolutionActor, filters: Annotated[QueueFilters, Query()]):
+    return resolution_workflow.list_workflows(db, filters)
+
+
+@router.post("/resolution/workflows", response_model=WorkflowDetail)
+def resolution_open(db: DB, actor: ResolutionActor, body: OpenWorkflow):
+    id = resolution_workflow.open_workflow(db, actor, body)
+    return resolution_workflow.detail(db, actor, id)
+
+
+@router.get("/resolution/workflows/{id}", response_model=WorkflowDetail)
+def resolution_detail(db: DB, actor: ResolutionActor, id: WorkflowId):
+    return resolution_workflow.detail(db, actor, id)
+
+
+@router.get("/resolution/workflows/{id}/options", response_model=ResolutionOptions)
+def resolution_workflow_options(request: Request, db: DB, actor: ResolutionActor, id: WorkflowId):
+    row = resolution_workflow.get_workflow(db, id)
+    if row.status not in resolution_workflow.REVIEWABLE:
+        return ResolutionOptions(message="The workflow has no editable action.")
+    return get_options(db, request.app.state.paypal, request.app.state.system2, row.dispute_id)
+
+
+@router.post("/resolution/workflows/{id}/review", response_model=WorkflowDetail)
+def resolution_review(request: Request, db: DB, actor: ResolutionActor, id: WorkflowId, body: Review):
+    resolution_workflow.review(db, actor, request.app.state.paypal, request.app.state.system2, id, body)
+    return resolution_workflow.detail(db, actor, id)
+
+
+@router.post("/resolution/workflows/{id}/submit", response_model=WorkflowDetail)
+def resolution_submit(
+    request: Request, db: DB, actor: ResolutionActor, id: WorkflowId, body: SubmitWorkflow,
+):
+    resolution_submission.submit(db, actor, request.app.state.paypal, request.app.state.system2, id, body)
+    return resolution_workflow.detail(db, actor, id)
+
+
+@router.post("/resolution/workflows/{id}/reconcile", response_model=WorkflowDetail)
+def resolution_reconcile(
+    request: Request, db: DB, actor: ResolutionActor, id: WorkflowId, body: Revision,
+):
+    resolution_submission.reconcile(db, actor, request.app.state.paypal, request.app.state.system2, id, body)
+    return resolution_workflow.detail(db, actor, id)
 
 
 @router.get("/disputes", response_model=Page[DisputeSummary])
@@ -149,6 +263,16 @@ def dispute_detail(db: DB, id: Annotated[int, Path(ge=1, le=2_147_483_647)]):
         "merchant": row.merchant,
         "status_history": history,
     }
+
+
+@router.get("/disputes/{id}/resolution", response_model=ResolutionOptions)
+def resolution_options(request: Request, db: DB, id: Annotated[int, Path(ge=1, le=2_147_483_647)]):
+    return get_options(db, request.app.state.paypal, request.app.state.system2, id)
+
+
+@router.post("/disputes/{id}/resolution/{action}")
+def resolve_dispute(id: WorkflowId, action: Action):
+    raise IntegrationError("APPROVAL_REQUIRED", "Use the Resolution Center to approve and submit an action.", 409)
 
 
 @router.get("/paypal/status", response_model=PayPalStatus)
@@ -274,6 +398,7 @@ def create_app(
     *,
     paypal_transport=None,
     system2_transport=None,
+    system2_stream_transport=None,
     groq_transport=None,
 ):
     @asynccontextmanager
@@ -283,21 +408,27 @@ def create_app(
         app.state.settings = config
         app.state.sessions = sessionmaker(engine, expire_on_commit=False)
         try:
-            with (
-                httpx.Client(
-                    base_url=config.paypal_base_url, transport=paypal_transport, timeout=15.0
-                ) as paypal_http,
-                httpx.Client(
-                    base_url=str(config.system2_base_url), transport=system2_transport, timeout=10.0
-                ) as system2_http,
-                httpx.Client(
-                    base_url=GROQ_BASE_URL, transport=groq_transport, timeout=25.0
-                ) as groq_http,
-            ):
-                app.state.paypal = PayPalClient(config, paypal_http)
-                app.state.system2 = System2Client(config, system2_http)
-                app.state.groq_counsel = GroqCounsel(config, groq_http)
-                yield
+            async with httpx.AsyncClient(
+                base_url=str(config.system2_base_url),
+                transport=system2_stream_transport,
+                timeout=httpx.Timeout(25.0, connect=10.0),
+            ) as system2_stream:
+                app.state.system2_stream = system2_stream
+                with (
+                    httpx.Client(
+                        base_url=config.paypal_base_url, transport=paypal_transport, timeout=15.0
+                    ) as paypal_http,
+                    httpx.Client(
+                        base_url=str(config.system2_base_url), transport=system2_transport, timeout=10.0
+                    ) as system2_http,
+                    httpx.Client(
+                        base_url=GROQ_BASE_URL, transport=groq_transport, timeout=25.0
+                    ) as groq_http,
+                ):
+                    app.state.paypal = PayPalClient(config, paypal_http)
+                    app.state.system2 = System2Client(config, system2_http)
+                    app.state.groq_counsel = GroqCounsel(config, groq_http)
+                    yield
         finally:
             engine.dispose()
 

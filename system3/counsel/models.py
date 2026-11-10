@@ -118,3 +118,62 @@ class CounselAnalysis(Base):
     model: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime())
     snapshot: Mapped[dict] = mapped_column(JSON)
+
+
+class ResolutionAttempt(Base):
+    __tablename__ = "resolution_attempts"
+    __table_args__ = (UniqueConstraint("request_id", name="uq_resolution_attempt_request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dispute_id: Mapped[int] = mapped_column(ForeignKey("disputes.id"), index=True)
+    capture_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    action: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    workflow_id: Mapped[int | None] = mapped_column(
+        ForeignKey("resolution_workflows.id", name="fk_resolution_attempt_workflow"), index=True
+    )
+    request_id: Mapped[str | None] = mapped_column(String(32))
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    response_reference: Mapped[str | None] = mapped_column(String(255))
+
+
+class ResolutionWorkflow(Base):
+    __tablename__ = "resolution_workflows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dispute_id: Mapped[int] = mapped_column(ForeignKey("disputes.id"), index=True)
+    payment_id: Mapped[str] = mapped_column(String(255), index=True)
+    analysis_id: Mapped[int] = mapped_column(ForeignKey("counsel_analyses.id"))
+    evidence_pack_id: Mapped[int] = mapped_column(ForeignKey("evidence_packs.id"))
+    recommendation: Mapped[str] = mapped_column(String(32))
+    strategy: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    assigned_reviewer: Mapped[str | None] = mapped_column(String(64))
+    revision: Mapped[int]
+    approval_revision: Mapped[int | None]
+    plan: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    information: Mapped[list[dict]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    paypal_status: Mapped[str | None] = mapped_column(String(128))
+    paypal_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class ResolutionEvent(Base):
+    __tablename__ = "resolution_events"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "revision", name="uq_resolution_event_revision"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("resolution_workflows.id"), index=True)
+    revision: Mapped[int]
+    actor_id: Mapped[str] = mapped_column(String(64))
+    event_type: Mapped[str] = mapped_column(String(48))
+    previous_status: Mapped[str | None] = mapped_column(String(32))
+    new_status: Mapped[str] = mapped_column(String(32))
+    details: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)

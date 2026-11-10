@@ -160,6 +160,9 @@ function CounselReference({ payment, dispute }: { payment: string; dispute: stri
     onError: () => {
       void queryClient.invalidateQueries({ queryKey: key });
     },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
   const shown = selected ?? latest.data;
   return (

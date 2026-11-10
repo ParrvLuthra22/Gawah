@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from threading import Lock
 
 import httpx
-from gawah_contract import PaymentRecord
+from gawah_contract import PaymentRecord, RefundRequest
 from pydantic import BaseModel, Field, SecretStr, TypeAdapter, ValidationError
 
 from .config import Settings
@@ -19,11 +19,11 @@ class IntegrationError(Exception):
         self.upstream_status = upstream_status
 
 
-def request_json(client: httpx.Client, service: str, method: str, path: str, **kwargs):
+def request_upstream(client: httpx.Client, service: str, method: str, path: str, **kwargs):
     try:
         response = client.request(method, path, **kwargs)
         response.raise_for_status()
-        return response.json()
+        return response
     except httpx.TimeoutException:
         raise IntegrationError("UPSTREAM_TIMEOUT", f"{service} timed out.", 504) from None
     except httpx.RequestError:
@@ -34,6 +34,12 @@ def request_json(client: httpx.Client, service: str, method: str, path: str, **k
         raise IntegrationError(
             code, f"{service} returned HTTP {status}.", upstream_status=status
         ) from None
+
+
+def request_json(client: httpx.Client, service: str, method: str, path: str, **kwargs):
+    response = request_upstream(client, service, method, path, **kwargs)
+    try:
+        return response.json()
     except ValueError:
         raise IntegrationError("INVALID_RESPONSE", f"{service} returned invalid JSON.") from None
 
@@ -176,6 +182,16 @@ class PayPalClient:
             raise IntegrationError("INVALID_RESPONSE", "PayPal returned a mismatched dispute ID.")
         return payload
 
+    def submit_action(self, path: str, payload: dict) -> httpx.Response:
+        return request_upstream(
+            self.http,
+            "PayPal Sandbox resolution",
+            "POST",
+            path,
+            json=payload,
+            headers={"Authorization": f"Bearer {self._access_token()}"},
+        )
+
 
 PAYMENTS = TypeAdapter(list[PaymentRecord])
 
@@ -187,16 +203,29 @@ class System2Client:
             settings.system2_key.get_secret_value() or settings.system3_key.get_secret_value()
         )
 
-    def get_json(self, path: str, *, service: str = "System 2 evidence", params=None):
+    def headers(self) -> dict[str, str]:
         if not self.key:
             raise IntegrationError("SYSTEM2_NOT_CONFIGURED", "The System 2 service key is missing.")
+        return {"X-Gawah-Key": self.key}
+
+    def get_json(self, path: str, *, service: str = "System 2 evidence", params=None):
         return request_json(
             self.http,
             service,
             "GET",
             path,
-            headers={"X-Gawah-Key": self.key},
+            headers=self.headers(),
             params=params,
+        )
+
+    def refund_payment(self, payment_id: str, body: RefundRequest) -> dict:
+        return request_json(
+            self.http,
+            "System 2 refund",
+            "POST",
+            f"/v1/payments/{payment_id}/refund",
+            headers=self.headers(),
+            json=body.model_dump(exclude_none=True),
         )
 
     def list_payments(self) -> list[PaymentRecord]:

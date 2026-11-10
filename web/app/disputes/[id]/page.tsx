@@ -6,6 +6,7 @@ import { ArrowLeft, Clock3, CreditCard, Users } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Empty, Failed, Pending, Status } from "@/components/dispute-states";
+import { Resolution } from "@/components/resolution";
 import { Button } from "@/components/ui/button";
 import {
   api, type DisputeDetail, type Party, formatAmount, formatDate, humanize, linkLabels, sourceLabels,
@@ -79,6 +80,7 @@ function Detail() {
           </div>
         </section>
       </div>
+      <Resolution dispute={dispute} />
       <section className="panel">
         <div className="panel-heading"><h2><Clock3 size={18} /> Status history</h2></div>
         {dispute.status_history.length === 0

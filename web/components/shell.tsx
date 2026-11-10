@@ -1,15 +1,19 @@
 "use client";
 
-import { CircleHelp, Cable, FolderOpen, ListChecks, Scale, ShieldCheck } from "lucide-react";
+import { Activity, CircleHelp, Cable, ClipboardCheck, FileCheck, FolderOpen, LayoutDashboard, ListChecks, Scale, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const navigation = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/disputes", label: "Disputes", icon: ListChecks },
   { href: "/evidence", label: "Evidence", icon: FolderOpen },
   { href: "/counsel", label: "AI Counsel", icon: Scale },
+  { href: "/resolution", label: "Resolution", icon: ClipboardCheck },
+  { href: "/ledger", label: "Ledger", icon: Activity },
+  { href: "/mandates", label: "Mandates", icon: FileCheck },
   { href: "/integrations/paypal", label: "PayPal integration", icon: Cable },
 ];
 
@@ -41,7 +45,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <div className="workspace">
         <aside className="sidebar">
-          <Link href="/disputes" className="brand">
+          <Link href="/dashboard" className="brand">
             <span className="brand-icon"><ShieldCheck size={23} aria-hidden="true" /></span>
             <span>GAWAH<small>DISPUTE COUNSEL</small></span>
           </Link>

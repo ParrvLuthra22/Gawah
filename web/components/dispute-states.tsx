@@ -44,6 +44,7 @@ export function useSync() {
     onSettled: () => Promise.all([
       queryClient.invalidateQueries({ queryKey: ["disputes"] }),
       queryClient.invalidateQueries({ queryKey: ["paypal"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
     ]),
   });
 }
