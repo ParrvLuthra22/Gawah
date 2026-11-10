@@ -45,6 +45,25 @@ export type ActivityFeed = {
   unavailable: string[];
 };
 
+export type EngineOverview = {
+  total_payments: number; successful_payments: number; failed_payments: number; blocked_purchases: number; simulated_disputes: number;
+};
+
+export type PaymentLedgerRow = {
+  id: string; proposal_id: string; amount_minor: number; currency: string; status: string;
+  created_at: string; merchant_reference: string | null; dispute_status: string | null; simulated: boolean;
+};
+
+export type BlockedPurchaseRow = {
+  id: string; proposal_id: string | null; amount_minor: number | null; currency: string | null;
+  reason: string | null; blocked_at: string; status: string; payment_id: string | null;
+};
+
+export type DemoScenario = {
+  scenario: string; dispute_id: number; payment_id: string; analysis_status: string | null;
+  recommendation: string | null; workflow_id: number | null; status: string; detail: string | null;
+};
+
 export const activeStatuses = ["OPEN", "WAITING_FOR_BUYER_RESPONSE", "WAITING_FOR_SELLER_RESPONSE", "UNDER_REVIEW"];
 
 export function useDashboard<T>(section: string, query: string) {

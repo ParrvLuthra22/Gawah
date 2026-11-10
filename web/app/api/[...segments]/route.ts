@@ -3,7 +3,8 @@ import type { NextRequest } from "next/server";
 const allowedGet = /^\/(?:disputes(?:\/\d+|\/sync\/history)?|paypal\/status|health|evidence\/[A-Za-z0-9_-]{1,255}(?:\/(?:timeline|verification|issues))?|counsel\/[A-Za-z0-9_-]{1,255}(?:\/history)?)$/;
 const evidenceAssemble = /^\/evidence\/[A-Za-z0-9_-]{1,255}\/assemble$/;
 const counselAnalyze = /^\/counsel\/[A-Za-z0-9_-]{1,255}\/analyze$/;
-const dashboardGet = /^\/(?:dashboard\/(?:overview|cases|evidence|counsel|activity|resolution)|mandates(?:\/[A-Za-z0-9_-]{1,255}(?:\/budget)?)?|ledger(?:\/(?:head|verify|stream|payments\/[A-Za-z0-9_-]{1,255}\/verification))?|disputes\/\d+\/resolution)$/;
+const dashboardGet = /^\/(?:dashboard\/(?:overview|cases|evidence|counsel|activity|resolution|payments|blocked-purchases|engine-overview)|mandates(?:\/[A-Za-z0-9_-]{1,255}(?:\/budget)?)?|ledger(?:\/(?:head|verify|stream|payments\/[A-Za-z0-9_-]{1,255}\/verification))?|disputes\/\d+\/resolution)$/;
+const dashboardDemo = /^\/dashboard\/demo-scenarios$/;
 const resolutionGet = /^\/resolution\/(?:actor|overview|workflows(?:\/\d+(?:\/options)?)?)$/;
 const resolutionPost = /^\/resolution\/workflows(?:\/\d+\/(?:review|submit|reconcile))?$/;
 
@@ -22,7 +23,7 @@ async function proxy(request: NextRequest, context: RouteContext<"/api/[...segme
   if (request.method === "POST") {
     const sync = path === "/disputes/sync";
     const counsel = counselAnalyze.test(path);
-    if (!sync && !counsel && !resolution && !evidenceAssemble.test(path)) {
+    if (!sync && !counsel && !resolution && !evidenceAssemble.test(path) && !dashboardDemo.test(path)) {
       return error(404, "Endpoint not found.");
     }
     const origin = request.headers.get("origin");
@@ -43,6 +44,7 @@ async function proxy(request: NextRequest, context: RouteContext<"/api/[...segme
     } else if (fetchSite ? fetchSite !== "same-origin" : origin && origin !== expectedOrigin) {
       return error(403, sync ? "Dispute sync must be requested from the Gawah console."
         : counsel ? "Counsel analysis must be requested from the Gawah console."
+        : dashboardDemo.test(path) ? "Demo scenarios must be requested from the Gawah console."
         : "Evidence assembly must be requested from the Gawah console.");
     }
   } else if (!resolution && !allowedGet.test(path) && !dashboardGet.test(path)) {

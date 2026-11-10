@@ -8,12 +8,12 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from gawah_contract import ErrorResponse
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import command_dashboard, resolution_submission, resolution_workflow
+from . import command_dashboard, demo, resolution_submission, resolution_workflow
 from .clients import IntegrationError, PayPalClient, System2Client
 from .command_schemas import (
     ActivityFeed,
@@ -126,6 +126,26 @@ def dashboard_resolution(db: DB, filters: Annotated[Period, Query()]):
     return resolution_workflow.statistics(
         db, *command_dashboard.period_conditions(filters, ResolutionWorkflow.created_at)
     )
+
+
+class DemoScenarioResponse(BaseModel):
+    scenario: str
+    dispute_id: int
+    payment_id: str
+    analysis_status: str | None
+    recommendation: str | None
+    workflow_id: int | None
+    status: str
+    detail: str | None = None
+
+
+@router.post("/dashboard/demo-scenarios", response_model=list[DemoScenarioResponse])
+def demo_scenarios(request: Request, db: DB):
+    """Create idempotent internal demo cases; no PayPal action is submitted."""
+    return [
+        DemoScenarioResponse(**row.__dict__)
+        for row in demo.run(db, request.app.state.system2, request.app.state.groq_counsel)
+    ]
 
 
 @router.get("/resolution/actor", response_model=Actor)
