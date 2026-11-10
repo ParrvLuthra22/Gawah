@@ -72,7 +72,7 @@ Keep the values in a password manager, not in the repo.
 | `ADMIN_KEY` | dashboard | step 1 |
 | `ENGINE_CORS_ORIGINS` | dashboard | gawah-web URL, e.g. `https://gawah-web.onrender.com` (no trailing slash; comma-separate several) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | dashboard | sandbox app credentials |
-| `PAYPAL_CARD_NUMBER`, `PAYPAL_CARD_EXPIRY` (`YYYY-MM`), `PAYPAL_CARD_CVV`, `PAYPAL_CARD_NAME` | dashboard | PayPal sandbox test card for the card payment route |
+| `PAYPAL_CARD_NUMBER`, `PAYPAL_CARD_EXPIRY`, `PAYPAL_CARD_CVV`, `PAYPAL_CARD_NAME` | dashboard | PayPal sandbox test card for the card payment route. **All three of number, expiry and CVV are required.** The expiry accepts `MM/YYYY`, `MM/YY` or `YYYY-MM` and is normalized to `YYYY-MM`; anything else stops the engine at startup |
 | `BUYER_EMAIL`, `BUYER_PASSWORD` | dashboard | optional: sandbox buyer for browser approval |
 | `GROQ_API_KEY` | dashboard | optional; without it the Guardian's category check uses its keyword fallback (`/health` says so) |
 | `CHANNEL3_API_KEY` | dashboard | optional |
@@ -153,6 +153,12 @@ the demo runs one.
 
 ## 5. Troubleshooting
 
+- *Engine exits at startup with "PayPal sandbox card is not configured correctly"*: the message
+  names the variable (`PAYPAL_CARD_NUMBER`, `_EXPIRY` or `_CVV`) that is missing or malformed; it
+  never prints a value. With PayPal credentials set, the engine will not start with a bad card and
+  never falls back silently to the browser-approval route. A payment attempted with a bad card
+  fails with `CARD_NOT_CONFIGURED` (recorded in the `PAYMENT_FAILED` ledger entry).
+  `GET /health` shows `"card_configured": true|false`; check it before recording.
 - *Engine starts then exits with "missing signing key"*: the database has data but its keys are
   gone (only possible if `DATABASE_URL` points at persistent storage but the keys are not). Point
   `LEDGER_SIGNING_KEY_PATH` and `MANDATE_SIGNING_KEY_PATH` at the same persistent location.

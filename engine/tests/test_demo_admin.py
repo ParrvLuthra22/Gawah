@@ -146,7 +146,7 @@ def test_health_in_mock_mode(monkeypatch):
     monkeypatch.setattr(settings, "gawah_mock", True)
     monkeypatch.setattr(settings, "gawah_env", "")
     assert TestClient(app).get("/health").json() == {
-        "status": "ok", "service": "gawah", "env": "dev", "mock": True, "paypal": "sandbox",
+        "status": "ok", "service": "gawah", "env": "dev", "mock": True, "paypal": "sandbox", "card_configured": False,
         "semantic": "fallback", "model": None}
 
 

@@ -11,12 +11,13 @@ from .config import cors_origins, settings
 from .errors import install_error_handlers
 from .harden import BodyLimitMiddleware
 from .routers import admin, ledger, mandates, merchants, payments, proposals
-from .services import check_fake_paypal_allowed, get_services
+from .services import check_card_config, check_fake_paypal_allowed, get_services
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     check_fake_paypal_allowed()
+    check_card_config()
     if not settings.gawah_mock:
         if settings.gawah_bootstrap:
             bootstrap_if_empty()
@@ -68,6 +69,7 @@ def health() -> dict[str, Any]:
     base: dict[str, Any] = {
         "status": "ok", "service": "gawah",
         "env": settings.gawah_env or "dev", "mock": settings.gawah_mock, "paypal": "sandbox",
+        "card_configured": not settings.card_problems(),  # a yes/no only, never a value
     }
     if settings.gawah_mock:
         return {**base, "semantic": "fallback", "model": None}  # mock mode never calls a model

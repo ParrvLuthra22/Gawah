@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -25,6 +26,7 @@ class PayPalError(Exception):
         self.body = body
         self.debug_id = debug_id
         text = message or (body.get("message") if isinstance(body, dict) else None) or "error"
+        self.message = text
         super().__init__(f"PayPal {status}: {text} (debug_id={debug_id})")
 
 
@@ -62,6 +64,12 @@ class PayPalClient:
         self._http = httpx.Client(base_url=self._base, transport=transport, timeout=timeout)
         self._token: str | None = None
         self._token_expires_at = 0.0
+        self._last = threading.local()  # per thread: PayPal-Debug-Id of the latest API response
+
+    @property
+    def last_debug_id(self) -> str | None:
+        """PayPal's debug id for this thread's most recent API call (for support and the ledger)."""
+        return getattr(self._last, "debug_id", None)
 
     # ---- auth ----
     def get_token(self) -> str:
@@ -103,6 +111,7 @@ class PayPalClient:
         if method == "POST":
             h["PayPal-Request-Id"] = idempotency_key or str(uuid.uuid4())
         r = self._http.request(method, path, json=json, headers=h)
+        self._last.debug_id = r.headers.get("paypal-debug-id")
         body = self._json(r)
         if r.status_code >= 400:
             raise self._error(r, body)
@@ -212,6 +221,14 @@ def pay_order(
             )
             if on_order:
                 on_order(order)
+            if order.get("status") == "PAYER_ACTION_REQUIRED":
+                # The card needs a 3D Secure challenge. It is not completed headlessly here (see
+                # docs/CONTRACT.md); fail with an explicit reason rather than a blind capture.
+                raise PayPalError(
+                    0, {}, client.last_debug_id,
+                    "card payment needs a 3D Secure payer-action step that is not completed "
+                    "headlessly",
+                )
             if order.get("status") != "COMPLETED":
                 order = client.capture_order(order["id"], f"{idempotency_key}-cap")
             return order
@@ -243,5 +260,14 @@ def pay_order(
         raise PayPalError(0, order, None, "order has no approval link")
     if on_order:
         on_order(order)
-    approver(link, buyer_email, buyer_password)
+    try:
+        approver(link, buyer_email, buyer_password)
+    except PayPalError:
+        raise
+    except Exception as e:
+        first = (str(e).strip().splitlines() or [""])[0][:160]
+        raise PayPalError(
+            0, {}, client.last_debug_id,
+            f"headless buyer approval failed ({type(e).__name__}: {first})",
+        ) from e
     return client.capture_order(order["id"], f"{idempotency_key}-cap")
