@@ -161,11 +161,13 @@ def review_state(row: ResolutionWorkflow) -> str:
     return "PENDING_REVIEW"
 
 
-def open_workflow(db: Session, actor: Actor, body: OpenWorkflow) -> int:
+def open_workflow(db: Session, actor: Actor, body: OpenWorkflow, *, allow_simulated: bool = False) -> int:
     actor.require_review()
     lock(db)
     dispute = get_dispute(db, body.dispute_id)
-    if dispute.source != Source.PAYPAL_API:
+    if dispute.source != Source.PAYPAL_API and not (
+        allow_simulated and dispute.source == Source.SIMULATED_FIXTURE
+    ):
         reject("SIMULATED_DISPUTE", "Simulated disputes are read-only.", 403)
     existing = db.scalar(
         select(ResolutionWorkflow)

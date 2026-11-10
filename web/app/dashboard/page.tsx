@@ -6,12 +6,13 @@ import { LayoutDashboard, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { DashboardAnalytics } from "@/components/dashboard-analytics";
 import { DashboardCases } from "@/components/dashboard-cases";
+import { DashboardLedger } from "@/components/dashboard-ledger";
 import { CounselMonitoring, DashboardActivity, EvidenceMonitoring } from "@/components/dashboard-monitoring";
 import { Panel, Remote, WorkflowBadge } from "@/components/dashboard-panels";
 import { ResolutionStats } from "@/components/resolution-stats";
 import { SyncButton, SyncFeedback, useSync } from "@/components/dispute-states";
 import { Button } from "@/components/ui/button";
-import { percent, type CounselStats, type EvidenceStats, type Overview, useDashboard } from "@/lib/dashboard";
+import { percent, type CounselStats, type EngineOverview, type EvidenceStats, type Overview, useDashboard } from "@/lib/dashboard";
 import { formatAmount, formatDate, sourceLabels } from "@/lib/disputes";
 import type { Stats } from "@/lib/resolution";
 
@@ -66,6 +67,7 @@ export default function DashboardPage() {
   const evidence = useDashboard<EvidenceStats>("evidence", query);
   const counsel = useDashboard<CounselStats>("counsel", query);
   const resolution = useDashboard<Stats>("resolution", query);
+  const engine = useDashboard<EngineOverview>("engine-overview", "");
   const client = useQueryClient();
   const refreshing = useIsFetching({ queryKey: ["dashboard"] }) > 0;
   const sync = useSync();
@@ -138,6 +140,8 @@ export default function DashboardPage() {
         <h2 className="text-lg font-bold">Executive overview</h2>
         <nav aria-label="Dashboard sections" className="actions text-sm">
           <a className="record-link" href="#cases">Cases</a>
+          <a className="record-link" href="#payment-ledger">Payments</a>
+          <a className="record-link" href="#blocked-purchases">Blocked</a>
           <a className="record-link" href="#analytics">Analytics</a>
           <a className="record-link" href="#evidence-monitoring">Evidence</a>
           <a className="record-link" href="#counsel-monitoring">Counsel</a>
@@ -146,9 +150,15 @@ export default function DashboardPage() {
         </nav>
       </div>
       <dl className="dashboard-metrics">
+        <Metric label="Total payments" value={engine.data?.total_payments} pending={engine.isPending} />
+        <Metric label="Successful payments" value={engine.data?.successful_payments} pending={engine.isPending} />
+        <Metric label="Failed payments" value={engine.data?.failed_payments} pending={engine.isPending} />
+        <Metric label="Blocked purchases" value={engine.data?.blocked_purchases} pending={engine.isPending} />
         <Metric label="Total disputes" value={counts?.total} pending={overview.isPending} />
         <Metric label="Open disputes" value={counts?.open} pending={overview.isPending}
           hint={counts ? `${counts.unlinked} ${counts.unlinked === 1 ? "case" : "cases"} without a matched payment` : undefined} />
+        <Metric label="Simulated disputes" value={engine.data?.simulated_disputes} pending={engine.isPending}
+          hint="Internal demo cases only; no PayPal action is sent." />
         <Metric label="Resolved disputes" value={counts?.resolved} pending={overview.isPending} />
         <Metric label="Awaiting merchant response" value={counts?.awaiting_merchant} pending={overview.isPending}
           hint={counts ? `${counts.overdue} overdue · ${counts.due_soon} due within 72h across active cases` : undefined} />
@@ -165,6 +175,8 @@ export default function DashboardPage() {
           hint={counselStats ? "Latest recommendation per case or standalone payment" : undefined} />
       </dl>
     </section>
+    {engine.isError && <p className="notice red">System 2 payment data is unavailable: {engine.error.message}</p>}
+    <DashboardLedger />
     <DashboardCases key={query} scope={query} statuses={counts?.by_status ?? []} reasons={counts?.by_reason ?? []} />
     <Panel title="Dispute analytics" id="analytics">
       <Remote result={overview} label="Dispute analytics">{data => <DashboardAnalytics data={data} />}</Remote>
