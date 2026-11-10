@@ -337,6 +337,7 @@ version = "0.1.0"
 source = { editable = "system1" }
 dependencies = [
     { name = "fastapi" },
+    { name = "gawah" },
     { name = "gawah-contract" },
     { name = "groq" },
     { name = "httpx" },
@@ -353,6 +354,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
+    { name = "gawah", editable = "." },
     { name = "gawah-contract", editable = "contract" },
     { name = "groq" },
     { name = "httpx" },

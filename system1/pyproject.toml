@@ -10,6 +10,7 @@ dependencies = [
     "httpx",
     "pydantic-settings",
     "gawah-contract",
+    "gawah",
 ]
 
 [build-system]
@@ -18,6 +19,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 gawah-contract = { workspace = true }
+gawah = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["shopper"]

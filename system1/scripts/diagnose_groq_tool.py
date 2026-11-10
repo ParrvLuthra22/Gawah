@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 from groq import AsyncGroq, BadRequestError
-
 from shopper.agent.shopping_agent import TOOL_DEFINITIONS, agent_system_prompt
 from shopper.config import Settings
 from shopper.integrations.groq_client import MODEL_PRIORITY
@@ -79,7 +78,7 @@ async def _request(
     except BadRequestError as exc:
         print(json.dumps({"label": label, "result": "bad_request", **_safe_error(exc)}))
         return None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - diagnostic must redact unexpected SDK failures.
         print(json.dumps({"label": label, "result": "error", "exception_type": type(exc).__name__}))
         return None
 

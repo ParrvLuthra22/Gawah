@@ -37,7 +37,7 @@ class StaticProvider:
     def __init__(self, products: list[Product]) -> None:
         self.products = products
 
-    async def list_products(self) -> list[Product]:
+    async def list_products(self, _intent: ShoppingIntent) -> list[Product]:
         return self.products
 
 

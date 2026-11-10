@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from shopper.main import app, get_discovery_service, get_intent_parser
 from shopper.models.product import Product
 from shopper.models.shopping_intent import ShoppingIntent
-from shopper.providers.demo_catalog import ProductProviderError
+from shopper.providers.demo_catalog import DemoCatalogProvider, ProductProviderError
 from shopper.services.discovery import DiscoveryService
 
 
@@ -32,14 +32,14 @@ class StaticProvider:
     def __init__(self, products: list[Product]) -> None:
         self.products = products
 
-    async def list_products(self) -> list[Product]:
+    async def list_products(self, _intent: ShoppingIntent) -> list[Product]:
         return self.products
 
 
 class FailingProvider:
     name = "test"
 
-    async def list_products(self) -> list[Product]:
+    async def list_products(self, _intent: ShoppingIntent) -> list[Product]:
         raise ProductProviderError("offline")
 
 
@@ -68,8 +68,12 @@ def test_filtering_preserves_rejection_reasons_and_requires_attributes() -> None
     result = asyncio.run(service.discover(shoe_intent()))
 
     assert [item.id for item in result.eligible] == ["shoe-1"]
-    assert result.rejected[0].reasons == ["missing_size"]
-    assert result.rejected[1].reasons == ["over_budget"]
+    assert result.needs_verification[0].reasons == ["missing_size"]
+    assert result.rejected[0].reasons == ["over_budget"]
+    verification = {item.product_id: item for item in result.verifications}
+    assert verification["shoe-1"].outcome == "verified"
+    assert verification["shoe-1"].purchase_ready is False
+    assert verification["missing-size"].attributes["size"].reason == "missing_size"
 
 
 def test_currency_mismatch_is_rejected() -> None:
@@ -79,6 +83,33 @@ def test_currency_mismatch_is_rejected() -> None:
 
     assert result.eligible == []
     assert result.rejected[0].reasons == ["currency_mismatch"]
+
+
+def test_footwear_taxonomy_is_needs_verification_without_conflating_audiences() -> None:
+    service = DiscoveryService(
+        StaticProvider(
+            [
+                product(id="athletic", category="shoes", product_type="Athletic Shoes"),
+                product(id="kids", category="kids shoes", product_type="Kids Sneakers"),
+            ]
+        )
+    )
+    adult_running = ShoppingIntent(
+        category="men's running shoes",
+        brand="Nike",
+        color="black",
+        size="12",
+        max_budget=Decimal(60),
+        currency="USD",
+    )
+
+    result = asyncio.run(service.discover(adult_running))
+
+    assert result.eligible == []
+    assert result.needs_verification[0].product.id == "athletic"
+    assert result.needs_verification[0].reasons == ["category_needs_verification"]
+    assert result.rejected[0].product.id == "kids"
+    assert result.rejected[0].reasons == ["category_mismatch"]
 
 
 def test_specific_bread_type_matches_only_atta_bread() -> None:
@@ -92,13 +123,25 @@ def test_specific_bread_type_matches_only_atta_bread() -> None:
             ]
         )
     )
-    bread_intent = ShoppingIntent(category="atta bread", max_budget=Decimal("10"), currency="USD")
+    bread_intent = ShoppingIntent(category="atta bread", max_budget=Decimal(10), currency="USD")
 
     result = asyncio.run(service.discover(bread_intent))
 
     assert [item.id for item in result.eligible] == ["atta-1", "atta-2"]
     assert [item.product.id for item in result.rejected] == ["white", "apples"]
     assert all(item.reasons == ["category_mismatch"] for item in result.rejected)
+
+
+def test_demo_catalog_matches_two_atta_breads_not_white_bread_or_apples() -> None:
+    result = asyncio.run(
+        DiscoveryService(DemoCatalogProvider()).discover(
+            ShoppingIntent(category="atta bread", max_budget=Decimal(10), currency="USD")
+        )
+    )
+
+    assert [item.id for item in result.eligible] == ["grocery-001", "grocery-004"]
+    rejected_ids = {item.product.id for item in result.rejected}
+    assert {"grocery-002", "grocery-003"}.issubset(rejected_ids)
 
 
 def test_provider_errors_are_propagated() -> None:

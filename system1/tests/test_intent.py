@@ -50,6 +50,16 @@ def test_nike_black_size_12_request_accepts_numeric_llm_size() -> None:
     assert intent.max_budget == 60
 
 
+def test_mens_us_size_requirement_is_preserved() -> None:
+    parser = parser_for(
+        '{"category":"running shoes","brand":"Nike","color":"black","size":10,'
+        '"audience":"men","size_system":"us","max_budget":50,"currency":"USD","preferences":[]}'
+    )
+    intent = asyncio.run(parser.parse("Find black Nike running shoes US size 10 under $50 for men"))
+    assert intent.audience == "men"
+    assert intent.size_system == "US"
+
+
 def test_request_without_budget() -> None:
     parser = parser_for(
         '{"category":"running shoes","brand":null,"color":null,"size":null,'

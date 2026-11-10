@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from numbers import Number
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,6 +13,8 @@ class ShoppingIntent(BaseModel):
     brand: str | None = None
     color: str | None = None
     size: str | None = None
+    audience: Literal["men", "women", "kids", "toddler", "unisex"] | None = None
+    size_system: Literal["US", "UK", "EU"] | None = None
     max_budget: Decimal | None = Field(default=None, gt=0)
     currency: str | None = None
     preferences: list[str] = Field(default_factory=list)
@@ -26,6 +29,20 @@ class ShoppingIntent(BaseModel):
         if isinstance(value, Number) and not isinstance(value, bool):
             return str(value)
         return value
+
+    @field_validator("audience", mode="before")
+    @classmethod
+    def normalize_audience(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().casefold()
+        aliases = {"male": "men", "man": "men", "female": "women", "woman": "women", "children": "kids"}
+        return aliases.get(normalized, normalized or None)
+
+    @field_validator("size_system", mode="before")
+    @classmethod
+    def normalize_size_system(cls, value: object) -> object:
+        return value.strip().upper() if isinstance(value, str) else value
 
     @field_validator("currency", mode="before")
     @classmethod

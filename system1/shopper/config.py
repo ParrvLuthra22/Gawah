@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # "auto" discovers currently enabled Groq models and uses the approved priority list.
     groq_model: str = "auto"
     product_provider: Literal["demo", "channel3"] = "demo"
+    channel3_api_key: str | None = None
+    attack_simulation_enabled: bool = False
+    merchant_signing_key_path: str = "keys/system1-merchant"
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV_FILE,
         env_file_encoding="utf-8",

@@ -34,14 +34,42 @@ class RejectedProduct(BaseModel):
     reasons: list[str] = Field(min_length=1)
 
 
+class NeedsVerificationProduct(BaseModel):
+    """A listing that has no known contradiction but lacks required verification."""
+
+    product: Product
+    reasons: list[str] = Field(min_length=1)
+
+
+class AttributeVerification(BaseModel):
+    """Evidence for one immutable-intent constraint.
+
+    This is deliberately product suitability evidence, not merchant checkout evidence.
+    """
+
+    status: str
+    source: str
+    reason: str | None = None
+
+
+class ProductVerification(BaseModel):
+    product_id: str
+    outcome: str
+    attributes: dict[str, AttributeVerification]
+    purchase_ready: bool = False
+
+
 class DiscoverySource(BaseModel):
     provider: str
     returned_count: int
     eligible_count: int
+    needs_verification_count: int = 0
     rejected_count: int
 
 
 class DiscoveryResult(BaseModel):
     eligible: list[Product]
+    needs_verification: list[NeedsVerificationProduct] = Field(default_factory=list)
     rejected: list[RejectedProduct]
     source: DiscoverySource
+    verifications: list[ProductVerification] = Field(default_factory=list)
