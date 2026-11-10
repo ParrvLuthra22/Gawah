@@ -7,7 +7,6 @@ scripts/demo_run.py. It calls the authenticated System 3 endpoint and never call
 import sys
 
 import httpx
-
 from counsel.config import Settings
 
 
