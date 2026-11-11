@@ -120,10 +120,9 @@ commands. It is left off on purpose, because on Render it could not take part in
   every cart is blocked as `MERCHANT_NOT_REGISTERED` or `CART_SIGNATURE_INVALID`.
 - **The shopper does not call the engine.** `shopper/config.py` has no engine URL or `SYSTEM1_KEY`;
   nothing in `system1/` posts a proposal. `integration/e2e.py` does that step today.
-- **Its proposals are blocked until a one-line fix** (`docs/INTEGRATION_ISSUES.md` #5).
 - **No authentication on `/shopping/*`**: a public shopper lets anyone spend the Groq quota.
 
-To enable it later: Suvir fixes #5 and adds an engine client; the shopper's key is supplied from
+To enable it later: Suvir adds an engine client (issue #7); the shopper's key is supplied from
 the environment (or its public key is registered after each deploy); then uncomment the block.
 Until then run the shopper locally: `make e2e` proves the chain without any hosted shopper.
 

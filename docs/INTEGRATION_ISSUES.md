@@ -44,7 +44,10 @@ It is tracked upstream now (an untracked local copy blocked `git pull` until rem
 did not edit `system1/`; everything below is what System 1 would have to change, with workarounds
 already in `integration/`.
 
-### 5. BLOCKER: every shopper proposal is blocked as `PRICE_MISMATCH` (system1, Suvir)
+### 5. FIXED (2026-11-11): every shopper proposal was blocked as `PRICE_MISMATCH` (system1, Suvir)
+System 1 now sends the cart sku as `product.id`. `integration/e2e.py` no longer rewrites it and a test
+asserts the unmodified proposal is ALLOWED. Original report, kept for the record:
+
 The Guardian finds the product in the signed cart by `proposal.product.id == cart line sku`
 (`engine/gawah_engine/guardian.py:206`; `contract/fixtures/proposal_shoes.json` has both equal to
 `SHOE-BLK-RUN`). The shopper sets `product.id` to its internal product id (`shoe-001`) while the cart
@@ -90,7 +93,9 @@ description as `rationale`) and labels it SIMULATED. Note `authority_spoof` is a
 Guardian rightly ALLOWS it because the injected text only ever lives in a description or rationale,
 which the Guardian never reads. The run also sends the same text on a $120 cart and checks it is blocked.
 
-### 9. Provider catalog and merchant catalog disagree (system1, Suvir)
+### 9. FIXED (2026-11-11): provider catalog and merchant catalog disagreed (system1, Suvir)
+`PurchasableDemoCatalogProvider` now limits the demo checkout to what the merchant stocks. Original report:
+
 `data/demo_catalog.json` has 13 products; the merchant catalog (`demo_merchant_catalog.json`) can only
 sell `shoe-001`, `shoe-002` (stock 0), `grocery-001`, `grocery-004`. If the real model selects
 `shoe-003` ($74, a valid pick for "black Nike running shoes size 12 under $80") the checkout answers
@@ -98,7 +103,9 @@ sell `shoe-001`, `shoe-002` (stock 0), `grocery-001`, `grocery-004`. If the real
 cheapest product, which happens to be `shoe-001`. Add the other shoes (and `demo-tech`) to the merchant
 catalog, or restrict the demo provider to what the merchant sells.
 
-### 10. `Settings` demands `GROQ_API_KEY` even when no model is used (system1, Suvir)
+### 10. FIXED (2026-11-11): `Settings` demanded `GROQ_API_KEY` even when no model is used (system1, Suvir)
+`groq_api_key` now defaults to empty. The path and authentication points below still apply. Original report:
+
 `Settings()` needs `groq_api_key`, so signing a cart or starting a standalone shopper without a key
 raises. `integration/` passes a placeholder. Make it optional (`str | None = None`) and fail only where
 Groq is called. Also: `MERCHANT_SIGNING_KEY_PATH` defaults to a path relative to the working
@@ -110,14 +117,34 @@ failed on a fresh clone. The root dev dependency group now includes `gawah-shopp
 `pythonpath` adds `.`, and `testpaths` adds `integration/tests`. Side effect: the engine's Render build
 (`uv sync --frozen`) also installs the shopper and `groq` (dev group), harmlessly.
 
-### 12. `ruff check .` fails on three System 3 files (system3, Navya)
+### 12. FIXED (2026-11-11): `ruff check .` failed on three System 3 files (system3, Navya)
+Import order fixed upstream; `ruff check .` is clean repo-wide. Original report:
+
 `I001` (import order, auto-fixable with `ruff check --fix`) in `system3/counsel/demo.py`,
 `system3/run_demo_scenarios.py` and `system3/tests/test_demo.py`. CLAUDE.md requires `ruff check .`
 to pass; System 2 did not touch them.
 
-### 13. System 2 follow-up: the keyword fallback has no grocery words (engine, Parrv)
+### 13. FIXED (2026-11-11): the keyword fallback let groceries through (engine)
+The fallback now fails closed for a known mandate category (Suvir), and recognises SwiftRun-style
+footwear names (`engine/tests/test_keyword_fallback.py`); "Harvest Gold Atta Bread" is blocked. The
+e2e uses a SIMULATED semantic model so it does not depend on either. Original report:
+
 Without a Groq key the Guardian's fallback labels `Harvest Gold Atta Bread` and `Green Valley Apples`
 under a footwear mandate as `unclear`, which does not block. With Groq all four demo grocery and
 electronics titles are `mismatch` (cached by `scripts/warm_semantic_cache.py`). The e2e therefore uses
 an electronics title for its wrong-category case, which the fallback does catch. Candidate fix: add
 bread, produce and similar words to the `groceries` group in `engine/gawah_engine/semantic.py`.
+
+### 14. `run_demo_scenarios.py` hardcodes Counsel's address (system3, Navya)
+`system3/run_demo_scenarios.py` posts to `http://127.0.0.1:8002`, so Counsel cannot run on another
+port for a rehearsal, and a leftover dev Counsel on 8002 would receive the call. Suggested: read the base
+URL from `Settings` or an env var (for example `COUNSEL_URL`, default `http://127.0.0.1:8002`).
+`scripts/rehearse.sh` pins Counsel to 8002 for this reason.
+
+### 15. Merchant key persistence needs no System 1 change (resolved, FYI)
+`MERCHANT_SIGNING_KEY_PATH` defaults to `keys/system1-merchant` (gitignored). `integration/e2e.py` and
+`scripts/rehearse.sh` set it to the absolute `<repo>/keys/system1-merchant`, so every shopper restart reuses
+the key. Run the shopper from the repo root or set the variable. If the engine's database remembers a
+different key, `e2e.py` stops and prints the remedy; `scripts/register_merchant_key.py --rotate` applies it.
+Still open for System 1: #6 (no endpoint exposes the public key) and #7 (the shopper never posts to the
+engine); both are worked around in `integration/`.
