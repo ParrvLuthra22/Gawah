@@ -26,6 +26,12 @@ keys/
 *.pem
 *.key
 *.sqlite
+# Local manual/E2E proposal and payment-response artifacts. They can contain signed carts,
+# transaction identifiers, and reconciliation state; retain locally but never commit.
+guardian_proposal.json
+proposal.json
+manual-proposal.json
+.final_sandbox_*.json
 
 # OS / editor
 .DS_Store
