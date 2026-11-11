@@ -1,61 +1,60 @@
 # Gawah
 
-Gawah (Urdu/Hindi for "witness") is a witness and dispute layer for AI agents that spend money through PayPal. It records what an agent was authorized to buy (the mandate), checks each purchase against it, keeps a signed ledger of what happened, and helps assemble evidence when a charge has to be disputed. Built for the PayPal AI Hackathon.
+Gawah (Urdu/Hindi for "witness") is an authorization and dispute layer for AI agents that spend money through PayPal. An agent that shops for you needs a limit it cannot talk its way past, and a record you can trust when a charge is disputed. Gawah gives you both: the user signs a **mandate** (what may be bought, from whom, up to how much), the agent can only *propose* a purchase, a **Guardian** decides without reading anything the agent wrote, PayPal pays, every step lands in a signed, hash-chained **ledger**, and **Dispute Counsel** turns that ledger into evidence and a recommendation. Built for the PayPal AI Hackathon. The mandates are **AP2-inspired ES256 signed JSON mandates**, not an AP2 implementation.
 
-## Run it locally
-
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and make.
-
-```sh
-make install
-cp .env.example .env
-cp system3/.env.example system3/.env
-cp web/.env.example web/.env.local
+```mermaid
+flowchart LR
+  U[User: signed mandate] --> G
+  S[Shopper agent + demo store<br/>System 1] -- signed cart + proposal --> G[Guardian<br/>System 2 engine]
+  G -- ALLOW only --> P[PayPal Orders v2<br/>sandbox]
+  G -- every step --> L[(Signed hash-chained ledger)]
+  P --> L
+  L --> C[Dispute Counsel<br/>System 3]
+  C --> D[Dashboard<br/>Next.js]
 ```
 
-For the local mock engine, generate a random service key with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and put it in `SYSTEM3_KEY` in all three files. To use separate keys, set Counsel's `SYSTEM2_KEY` to the engine's `SYSTEM3_KEY`, and match Counsel's `SYSTEM3_KEY` in `web/.env.local`. The Next.js server adds the Counsel key to allowlisted API requests.
+## How it works
 
-Start everything with one command, or each service in its own terminal.
+- **Mandate**: user, category, item description, merchant allow-list, integer-cent budget (`8000` = $80.00), expiry; signed ES256. The shopper can read mandates and submit proposals. It has no payment or refund route (`SCOPES` in `engine/gawah_engine/auth.py`).
+- **Guardian**: checks the mandate signature, expiry and revocation, the merchant's signed cart (ES256, registered key), price, merchant, currency, remaining budget and duplicates. It never reads the agent's rationale. A constrained category check (sku/title/variant only, wrapped as untrusted) can only add a BLOCK. A wrong size or colour does not block: it is stored as an advisory.
+- **Ledger**: write first, pay second. `PAYMENT_STARTED` is committed before any PayPal call; entries are hashed, chained and signed (ES256), the database refuses UPDATE and DELETE, and `/v1/ledger/verify` recomputes everything.
+- **Counsel**: assembles an evidence bundle per payment (mandate, signed cart, decision, ledger, PayPal ids), checks it against the engine, and recommends DEFEND, CONCEDE_REMEDY or REQUEST_MORE_EVIDENCE with a Groq model constrained to verified findings.
 
-```sh
-make dev-all   # engine 8000, counsel 8002, web 3000 together; Ctrl-C stops all (shopper uses 8001)
-```
+## How PayPal is used (sandbox only)
 
-| Command | Service |
-| --- | --- |
-| `make dev-engine` | System 2 on port 8000 |
-| `make dev-counsel` | System 3 on port 8002. Applies migrations before starting. |
-| `make dev-web` | Dashboard on port 3000 |
+Orders v2 (`/v2/checkout/orders`) with the buyer's sandbox card in `payment_source.card`, `PayPal-Request-Id` idempotency keys and `custom_id` pointing back at the ledger entry; capture refunds via `/v2/payments/captures/{id}/refund` (an operator action through the engine, `scripts/refund_demo.py`); and the Disputes API (`/v1/customer/disputes`) read by Counsel. No live PayPal.
 
-On Windows without make, run `uv sync` and `npm install` in the same directories as the Makefile's install recipe. Run the engine and web commands from their respective recipes. Start Counsel in `system3` with these two commands.
+## Run it
 
-```sh
-uv run --no-project --with-requirements requirements.txt --with-editable ../contract python -m alembic upgrade head
-uv run --no-project --with-requirements requirements.txt --with-editable ../contract python -m uvicorn counsel.main:app --reload --port 8002
-```
-
-Counsel defaults to `system3/counsel.db` (SQLite). Set its `DATABASE_URL` to a PostgreSQL connection URL to use PostgreSQL. For deployment, set an absolute SQLite database path on persistent storage or use a PostgreSQL connection URL. Run the same Alembic migration command for the chosen database before starting Counsel.
-
-To load simulated disputes, run this command in `system3` after migrating.
+Needs Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, make. Commands are from the `Makefile`.
 
 ```sh
-uv run --no-project --with-requirements requirements.txt --with-editable ../contract python -m counsel.main seed-fixtures
+make install                       # uv sync, Counsel's dependencies, npm ci
+cp .env.example .env && cp system3/.env.example system3/.env && cp web/.env.example web/.env.local
+make dev-all                       # engine 8000, Counsel 8002, web 3000; Ctrl-C stops all (shopper is 8001, not started here)
+make e2e                           # shopper -> Guardian -> payment -> ledger, SIMULATED PayPal and models, no network
+make rehearse                      # the whole demo in video order; REAL PayPal sandbox payments, needs .env and network
+make test                          # engine + contract, Counsel and web tests;  make lint  runs ruff
 ```
 
-The `pay_04` case is a read-only fixture. For actual Sandbox disputes, put credentials from your own PayPal Sandbox app in `system3/.env` and sync from the dashboard. Keep that file private and use separate local files for Engine and Next.js.
+Set the same random `SYSTEM1_KEY` / `SYSTEM3_KEY` values in the env files (`python -c "import secrets; print(secrets.token_urlsafe(32))"`); details in `docs/CONTRACT.md`. `make e2e E2E_MODE=real` runs one real sandbox purchase; `make dev-engine`, `make dev-counsel` and `make dev-web` start one service each. `make e2e` and `make rehearse` details: `integration/README.md`. Hosted demo (Render) and seeding it from a laptop: `docs/DEPLOY.md`.
 
-To exercise resolution locally, set `ENABLE_SANDBOX_RESOLUTION=true` in `system3/.env` and restart Counsel. The console requires confirmation for every action. Full payment refunds require a matching real System 2 capture. PayPal evidence submission supports reviewed text where PayPal requests `OTHER` evidence, and claim acceptance requires PayPal to offer a full refund. Hosted browser sessions have read-only resolution access.
+## What is simulated
 
-The API contract for the three systems is in `docs/CONTRACT.md`; ownership is in `OWNERS.md`.
+- **PayPal money** is sandbox money. `make e2e` and the tests use the engine's fake PayPal (`GAWAH_ENV=test`); `make rehearse` uses the real sandbox.
+- **Attacker proposals** in the e2e and rehearsal are built by the harness from System 1's attack fixtures and signed with the demo merchant key. The e2e's language models (the shopper's and the Guardian's category check) are stubs.
+- **The wrong-size cart** (size 11 against a size-12 mandate) is crafted the same way: the shopper's catalog has no stock for it.
+- **The demo disputes** are `SIMULATED_FIXTURE` records created by Counsel's demo scenarios; outputs say "SIMULATED CASE". Counsel cannot refund them itself; the refund step is an operator refund through the engine.
 
-`make install` installs all three systems; `make test` runs the engine and contract tests, Counsel's tests and the web tests; `make lint` runs ruff.
+## Known limits
 
-## Hosted demo (Render)
+- The hosted dashboard has **no user login**; anyone with the URL can use it. Only sandbox data.
+- Free-tier hosting is **ephemeral**: instances sleep and all hosted data (mandates, ledger, keys, Counsel's database) resets on restart.
+- Deleting the **tail** of the ledger leaves a valid shorter chain. Detecting it needs the signed head (`/v1/ledger/head`) anchored somewhere outside the database. Not done. (Reasoned from the design, not tested.)
+- The **shopper is not hosted**: its routes have no authentication, so it runs on your machine.
+- Counsel reports order, fulfilment and delivery records as unavailable: the contract has none.
+- The model step in Counsel is nondeterministic and rate-limited; `make rehearse` retries it once.
 
-`render.yaml` deploys the engine, Counsel and the web app on Render; the steps and the checklist are in [docs/DEPLOY.md](docs/DEPLOY.md), and `scripts/smoke_remote.py` checks the deployed stack hop by hop. It is a **PayPal sandbox** demo on **free instances: the filesystem is ephemeral and instances sleep when idle**, so all hosted data (mandates, ledger, keys, Counsel's database) is reset on every restart or redeploy, and the first request after a sleep can take about a minute. The engine's `GAWAH_BOOTSTRAP=1` recreates an empty database, new signing keys and the demo merchant on each start, so the ledger and its keys always match. `POST /v1/admin/reset-demo` (admin key, `GAWAH_ENV=demo` only) resets the engine on demand for re-recording. Never commit `.env` or anything under `keys/`.
+## License and team
 
-## Status
-
-In progress.
-
-AP2 here is AP2-inspired unless the SDK spike (C1 in `spikes/spikes.md`) passes.
+MIT (`LICENSE`). System 1 (shopper agent, demo store, attack simulation): Suvir, `system1/`. System 2 (authorization, Guardian, payments, ledger, orchestration): Parrv, `engine/`. System 3 (Dispute Counsel, dashboard): Navya, `system3/` and `web/`. Shared contract: `contract/`, `docs/CONTRACT.md`; rules in `OWNERS.md`. Why AP2 is not used directly: `spikes/spikes.md` (C1).
