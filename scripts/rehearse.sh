@@ -163,6 +163,10 @@ if counsel_scenarios; then took; else
   if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
 fi
 
+step "4a/6 does Counsel's API offer a refund for the CONCEDE case? (before the engine refund)"
+run "refund option probe" env "ENGINE_URL=$ENGINE_URL" "COUNSEL_URL=http://127.0.0.1:$COUNSEL_PORT" \
+  "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/rehearse_probe.py --options-only
+
 step "4b/6 operator refund of the CONCEDE payment, via the engine (SANDBOX)"
 run "refund demo" env "ENGINE_URL=$ENGINE_URL" "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/refund_demo.py
 

@@ -149,41 +149,31 @@ different key, `e2e.py` stops and prints the remedy; `scripts/register_merchant_
 Still open for System 1: #6 (no endpoint exposes the public key) and #7 (the shopper never posts to the
 engine); both are worked around in `integration/`.
 
-### 16. Counsel's demo: DEFEND works, CONCEDE_REMEDY still declined by the model (PARTLY FIXED 2026-11-11; the rest is open in System 3)
-Observed in a real-sandbox `scripts/rehearse.sh` run after the engine change below (payment ids masked;
-DEFEND `pay_...a5c`, CONCEDE `pay_...22f`; rehearsal 49s, every step passed).
+### 16. Counsel's demo reaches DEFEND and CONCEDE_REMEDY (FIXED 2026-11-11; remaining gaps below)
+Observed in two real-sandbox `scripts/rehearse.sh` runs after merging origin/navya (`d9a4eb4`) on top of
+the engine's `GuardianDecision.mandate_id` (ids masked; runs took 39s and 109s, the latter includes the
+retry below):
 
-**FIXED, DEFEND (reason `UNAUTHORISED`).** The engine's `GuardianDecision` had no `mandate_id`, which
-`_verified_authorization` requires (`decision.payload["mandate_id"]`). Now `GuardianDecision.mandate_id`
-is an optional contract field (`docs/CONTRACT.md`, schemas regenerated), set from the proposal's mandate
-on every ALLOW and BLOCK decision, stored in the DECISION_MADE ledger data (it already was) and returned
-in the evidence bundle's `decision`. Decisions stored earlier have none and still validate (test:
-`test_decisions_stored_before_mandate_id_existed_still_load`). Observed: all ten conditions of
-`_verified_authorization` pass on the live pack, Counsel produces `AUTHORIZATION_CONSENT` and recommends
-`DEFEND` (confidence 0.8), labelled "SIMULATED CASE".
+- **DEFEND** (reason `UNAUTHORISED`): `DEFEND`, confidence 1.0 / 0.8 in the two runs, finding
+  `AUTHORIZATION_CONSENT`, labelled "SIMULATED CASE". Needed the engine's `mandate_id` (fixed earlier).
+- **CONCEDE** (`MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED`, size 11 against a size-12 mandate):
+  `CONCEDE_REMEDY`, confidence 0.9, "Recommend a full refund for the verified authorized-size mismatch",
+  findings `ORDER_VARIANT_CONFLICT` and `AUTHORIZED_SIZE_MISMATCH`, labelled "SIMULATED CASE".
+- **Refund option:** for the PAID concede payment `GET /api/disputes/2/resolution` (service key, no
+  console credential) offers `refund`, 5500c, labelled "Simulated dispute, sandbox refund"
+  (`scripts/rehearse_probe.py --options-only`, rehearse step 4a, run BEFORE the engine refund; once the
+  payment is REFUNDED the option is gone, "No supported resolution action is currently available").
+- **Operator refund via the engine** (`scripts/refund_demo.py`, step 4b): REFUNDED 5500c on the real
+  sandbox, budget spent 5500c -> 0c, one `REFUNDED` ledger entry, chain ok (36 entries).
 
-**OPEN, CONCEDE (size mismatch), System 3.** Unchanged: the deterministic rule fires (finding
-`AUTHORIZED_SIZE_MISMATCH` present; four primary checks VERIFIED; cart, mandate trusted; Guardian
-advisory in the ledger) and the final answer is `REQUEST_MORE_EVIDENCE` with no `conflict` and null
-confidence, so the Groq model chose it (`recommend()` honours that choice). Read, not run:
-`system3/counsel/groq_counsel.py` INSTRUCTIONS still say a decisive outcome needs "the amount
-comparison" and "a payment or signed cart cannot establish delivery", which would steer the model away.
-The raw plan is not exposed, so this cause is an inference. Suggested for Navya: if the assessment's
-supported outcome is decisive and the required finding is present, do not let the model downgrade it,
-or update the prompt for the size-mismatch case.
-
-**Refund, now demonstrable through the engine.** Counsel cannot refund a demo case itself
-(`disabled_reason`: "Simulated disputes are read-only.", still observed with
-`ENABLE_SANDBOX_RESOLUTION=true`; the resolution workflow API also answers 401 to the service key).
-`scripts/refund_demo.py` (rehearse step 4b, right after Counsel's scenarios) is an OPERATOR refund via
-the engine's route with `SYSTEM3_KEY`, labelled "Counsel recommended CONCEDE_REMEDY". Observed against
-the real PayPal sandbox: status REFUNDED, 5500c; mandate budget spent 5500c -> 0c (reserved 0); one new
-ledger entry `REFUNDED` (seq 36); chain ok, 36 entries. Tested with the fake PayPal
-(`test_a_full_refund_restores_the_budget_and_writes_a_ledger_entry`,
-`test_refund_demo_script_refunds_the_last_paid_payment_and_reports_it`). Counsel's own recommendation was
-`REQUEST_MORE_EVIDENCE`, so the label states what Counsel recommended in principle for a size mismatch,
-not what it output. Because the refund runs before the Counsel check, `counsel-check` and the probe
-count PAID or REFUNDED payments.
-
-Still true: Counsel lists `ORDER_UNAVAILABLE`, `FULFILLMENT_UNAVAILABLE`, `DELIVERY_UNAVAILABLE` (the
-contract exposes no merchant order, fulfilment or delivery record).
+Remaining gaps, all open:
+1. The Counsel step is model-dependent. In the 109s run the first attempt for the CONCEDE case came back
+   `FAILED` ("Run AI Counsel on the latest evidence pack", the Groq rate limit); the one retry in
+   `rehearse.sh` after 30s succeeded. Both of the earlier runs with the older Counsel prompt gave
+   `REQUEST_MORE_EVIDENCE`; two runs with the new code gave CONCEDE_REMEDY, which is not proof it always will.
+2. Preparing and approving the refund in the Resolution Center workflow needs the console's own
+   credential: `/api/resolution/workflows` and `/api/resolution/actor` answer 401
+   `RESOLUTION_AUTH_REQUIRED` to the service key. NOT run: prepare, approve and submit through Counsel.
+   The only refund actually executed is the operator one through the engine.
+3. Counsel still lists `ORDER_UNAVAILABLE`, `FULFILLMENT_UNAVAILABLE`, `DELIVERY_UNAVAILABLE` (the
+   contract exposes no merchant order, fulfilment or delivery record).

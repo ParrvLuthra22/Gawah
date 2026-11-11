@@ -30,6 +30,16 @@ def main() -> int:
     eng = httpx.Client(base_url=engine_url, headers=h, timeout=60)
     cou = httpx.Client(base_url=counsel_url + "/api", headers=h, timeout=120)
 
+    if "--options-only" in sys.argv:  # run BEFORE the refund: is a refund offered for the CONCEDE case?
+        last = [p for p in eng.get("/v1/payments").json() if p["status"] == "PAID"][-1]
+        items = cou.get("/disputes").json().get("items") or []
+        did = next((d["id"] for d in items if d.get("payment_id") == last["id"]), None)
+        o = cou.get(f"/disputes/{did}/resolution").json()
+        print(f"   CONCEDE payment {mask(last['id'])} ({last['status']}), dispute {did}: "
+              f"options {[(x['action'], x.get('amount_minor'), x.get('label')) for x in o.get('options', [])]}; "
+              f"message: {o.get('message')}")
+        return 0
+
     print("A. /v1/payments ordering (Counsel's demo takes payments[-2:])")
     pays = eng.get("/v1/payments").json()
     times = [p["created_at"] for p in pays]
