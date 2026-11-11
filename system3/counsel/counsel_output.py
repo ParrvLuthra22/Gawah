@@ -16,12 +16,15 @@ def recommend(assessment: CaseAssessment, plan: ModelPlan) -> CounselDecision:
         conflict = (
             "The model proposed a recommendation the available verified evidence does not support."
         )
-    elif any(
-        "AMOUNT_COMPARISON" not in refs
-        for refs in (plan.reasoning_finding_ids, plan.draft_finding_ids)
+    elif (required := {
+        "INCORRECT_AMOUNT": "AMOUNT_COMPARISON",
+        "UNAUTHORISED": "AUTHORIZATION_CONSENT",
+        "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED": "AUTHORIZED_SIZE_MISMATCH",
+    }.get(assessment.dispute_reason)) and any(
+        required not in refs for refs in (plan.reasoning_finding_ids, plan.draft_finding_ids)
     ):
         conflict = (
-            "The model did not cite the price comparison required for a decisive recommendation."
+            "The model did not cite the evidence required for a decisive recommendation."
         )
     else:
         return CounselDecision(recommendation=plan.recommendation, confidence=plan.confidence)
@@ -38,7 +41,16 @@ def draft(
 ) -> CounselOutcome:
     findings = {finding.id: finding for finding in assessment.findings}
     trust = {record.id: record for record in classification.records}
-    mandatory = [key for key in ("COMPLAINT", "ORDER_VARIANT_CONFLICT") if key in findings]
+    mandatory = [
+        key
+        for key in (
+            "COMPLAINT",
+            "ORDER_VARIANT_CONFLICT",
+            "AUTHORIZATION_CONSENT",
+            "AUTHORIZED_SIZE_MISMATCH",
+        )
+        if key in findings
+    ]
     reasoning = [
         findings[key]
         for key in dict.fromkeys([*mandatory, *plan.reasoning_finding_ids])
@@ -71,9 +83,11 @@ def draft(
         elif "UNKNOWN" in sources:
             label = "Source unconfirmed. "
         draft_lines.append(f"{label}{finding.text} [{', '.join(finding.evidence_ids)}]")
+    simulated = any(record.source_type == "SIMULATED_FIXTURE" for record in classification.records)
+    simulated_label = "SIMULATED CASE — " if simulated else ""
     return CounselOutcome(
         **decision.model_dump(),
-        executive_summary=summaries[decision.recommendation],
+        executive_summary=simulated_label + summaries[decision.recommendation],
         reasoning=reasoning,
         supporting_evidence_ids=list(
             dict.fromkeys(
@@ -83,6 +97,7 @@ def draft(
         draft_response="\n\n".join(
             [
                 "Thank you for the opportunity to respond to this dispute.",
+                *(["SIMULATED CASE — no PayPal action is authorized by this output."] if simulated else []),
                 *draft_lines,
                 replies[decision.recommendation],
             ]

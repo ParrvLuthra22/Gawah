@@ -235,6 +235,34 @@ def assess_case(case: CounselCase, classification: Classification) -> CaseAssess
                     )
                 )
                 break
+    if reason == "UNAUTHORISED":
+        if references := _verified_authorization(case, classification):
+            assessment.findings.append(
+                Finding(
+                    id="AUTHORIZATION_CONSENT",
+                    text=(
+                        "The signed mandate, Guardian ALLOW decision, and verified payment record "
+                        "show consent for this transaction within the mandate."
+                    ),
+                    evidence_ids=references,
+                )
+            )
+            assessment.supported_outcome = "DEFEND"
+        return assessment
+    if reason == "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED":
+        if references := _verified_authorized_size_mismatch(case, classification):
+            assessment.findings.append(
+                Finding(
+                    id="AUTHORIZED_SIZE_MISMATCH",
+                    text=(
+                        "The verified signed cart differs from the mandate's authorized size; "
+                        "the Guardian recorded the authorized-size mismatch advisory."
+                    ),
+                    evidence_ids=references,
+                )
+            )
+            assessment.supported_outcome = "CONCEDE_REMEDY"
+        return assessment
     if (
         not dispute_record
         or reason != "INCORRECT_AMOUNT"
@@ -264,6 +292,80 @@ def assess_case(case: CounselCase, classification: Classification) -> CaseAssess
         else "REQUEST_MORE_EVIDENCE"
     )
     return assessment
+
+
+def _all_primary_checks_verified(case: CounselCase) -> bool:
+    summary = case.pack.verification_summary
+    return all(
+        check is not None and check.status == "VERIFIED"
+        for check in (
+            summary.mandate_signature,
+            summary.cart_signature,
+            summary.payment_reference_match,
+            summary.ledger,
+        )
+    )
+
+
+def _verified_authorization(case: CounselCase, classification: Classification) -> list[str] | None:
+    if not _all_primary_checks_verified(case):
+        return None
+    records = {item.type: item for item in case.pack.evidence if item.type != "ledger_entry"}
+    trusted = {record.id for record in classification.records if record.reliable}
+    required = {"mandate", "signed_cart", "payment", "decision"}
+    if not required <= records.keys() or any(
+        records[kind].id not in trusted for kind in required - {"decision"}
+    ):
+        return None
+    mandate = records["mandate"]
+    payment = records["payment"]
+    decision = records["decision"]
+    if (
+        decision.source_type != "REAL_RECORD"
+        or decision.id in classification.invalid_evidence_ids
+        or decision.payload.get("verdict") != "ALLOW"
+        or payment.payload.get("status") != "PAID"
+        or payment.payload.get("decision_id") != decision.source_record_id
+        or payment.payload.get("proposal_id") != decision.payload.get("proposal_id")
+        or decision.payload.get("mandate_id") != mandate.source_record_id
+    ):
+        return None
+    approvals = [
+        item
+        for item in case.pack.evidence
+        if item.type == "ledger_entry"
+        and item.id in trusted
+        and item.payload.get("type") == "DECISION_MADE"
+        and item.payload.get("subject_id") == decision.source_record_id
+    ]
+    if len(approvals) != 1:
+        return None
+    approved = approvals[0].payload.get("data")
+    if not isinstance(approved, dict) or (
+        approved.get("verdict"), approved.get("mandate_id"), approved.get("proposal_id")
+    ) != ("ALLOW", mandate.source_record_id, payment.payload.get("proposal_id")):
+        return None
+    return [mandate.id, decision.id, payment.id]
+
+
+def _verified_authorized_size_mismatch(
+    case: CounselCase, classification: Classification
+) -> list[str] | None:
+    if not _all_primary_checks_verified(case):
+        return None
+    trusted = {record.id for record in classification.records if record.reliable}
+    records = {item.type: item for item in case.pack.evidence if item.type != "ledger_entry"}
+    mandate = records.get("mandate")
+    cart = records.get("signed_cart")
+    if mandate is None or cart is None:
+        return None
+    for issue in case.pack.contradictions:
+        if issue.code != "AUTHORIZED_SIZE_MISMATCH":
+            continue
+        references = set(issue.evidence_ids)
+        if references == {mandate.id, cart.id} and references <= trusted:
+            return issue.evidence_ids
+    return None
 
 
 def _verified_billing(

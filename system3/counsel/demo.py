@@ -14,7 +14,7 @@ from .models import Dispute, DisputeStatusHistory, Source, now
 from .resolution_auth import Actor
 from .resolution_schemas import OpenWorkflow
 
-SCENARIOS = (("DEFEND", "ITEM_NOT_RECEIVED"), ("CONCEDE", "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"))
+SCENARIOS = (("DEFEND", "UNAUTHORISED"), ("CONCEDE", "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"))
 
 
 @dataclass(frozen=True)

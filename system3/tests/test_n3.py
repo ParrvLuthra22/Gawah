@@ -33,7 +33,13 @@ def db():
     engine.dispose()
 
 
-def save_dispute(db, *, reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED", case_id="PP-D-CASE"):
+def save_dispute(
+    db,
+    *,
+    reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+    case_id="PP-D-CASE",
+    source="PAYPAL_API",
+):
     row = Dispute(
         paypal_dispute_id=case_id,
         payment_id=PAYMENT_ID,
@@ -41,7 +47,7 @@ def save_dispute(db, *, reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED", case_id="P
         reason=reason,
         status="OPEN",
         transaction_id="CAPTURE1",
-        source="PAYPAL_API",
+        source=source,
         raw_response={},
         last_synced_at=now(),
     )
@@ -85,18 +91,19 @@ def save_pack(db, dispute=None, *, version=1, **fields):
     return row
 
 
-def save_billing_pack(db, dispute, records):
+def save_billing_pack(db, dispute, records, *, verification_summary=None, **fields):
     return save_pack(
         db,
         dispute,
         evidence=records,
-        verification_summary=VerificationSummary(
+        verification_summary=verification_summary or VerificationSummary(
             mandate_signature=VERIFIED,
             cart_signature=VERIFIED,
             payment_reference_match=VERIFIED,
             ledger=VERIFIED,
             engine_ledger=VERIFIED,
         ),
+        **fields,
     )
 
 
@@ -220,6 +227,7 @@ def billing_evidence(dispute, charged=6500, *, cart_check=VERIFIED):
             "dispute",
             dispute.paypal_dispute_id,
             dispute=dispute,
+            origin="SIMULATED_FIXTURE" if dispute.source == "SIMULATED_FIXTURE" else "REAL_RECORD",
             reason=dispute.reason,
             transaction_id="CAPTURE1",
             status="UNVERIFIED",
@@ -268,10 +276,22 @@ def billing_evidence(dispute, charged=6500, *, cart_check=VERIFIED):
             subject_id="dec_1",
             data={
                 "proposal_id": "prop_1",
+                "mandate_id": "man_1",
                 "verdict": "ALLOW",
                 "amount_minor": 6500,
                 "currency": "USD",
             },
+        ),
+        item(
+            "decision",
+            "dec_1",
+            dispute=dispute,
+            id="dec_1",
+            verdict="ALLOW",
+            mandate_id="man_1",
+            proposal_id="prop_1",
+            status="UNVERIFIED",
+            check=None,
         ),
         item(
             "ledger_entry",
@@ -301,7 +321,7 @@ def billing_evidence(dispute, charged=6500, *, cart_check=VERIFIED):
             "delivery confirmation",
         ),
         ("DUPLICATE_TRANSACTION", 6500, "REQUEST_MORE_EVIDENCE", "both alleged charges"),
-        ("UNAUTHORISED", 6500, "REQUEST_MORE_EVIDENCE", "payer consent"),
+        ("UNAUTHORISED", 6500, "DEFEND", "payer consent"),
     ],
 )
 def test_assessment_requires_evidence_relevant_to_the_complaint(
@@ -324,6 +344,87 @@ def test_assessment_requires_evidence_relevant_to_the_complaint(
         )
         assert mandate_check.evidence_ids == ["mandate:man_1"]
         assert "Payer consent still needs separate evidence" in mandate_check.text
+
+
+def test_verified_unauthorised_case_defends_from_guardian_consent(db):
+    dispute = save_dispute(db, reason="UNAUTHORISED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    save_billing_pack(db, dispute, evidence)
+    case = load_case(db, PAYMENT_ID)
+    result = assess_case(case, classify_evidence(case))
+    consent = next(finding for finding in result.findings if finding.id == "AUTHORIZATION_CONSENT")
+    assert result.supported_outcome == "DEFEND"
+    assert consent.evidence_ids == ["mandate:man_1", "decision:dec_1", f"payment:{PAYMENT_ID}"]
+
+
+def test_unverified_primary_check_cannot_defend_unauthorised_case(db):
+    dispute = save_dispute(db, reason="UNAUTHORISED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    summary = VerificationSummary(
+        mandate_signature=VERIFIED,
+        cart_signature=Verification(status="UNVERIFIED", detail="Not checked."),
+        payment_reference_match=VERIFIED,
+        ledger=VERIFIED,
+        engine_ledger=VERIFIED,
+    )
+    save_billing_pack(db, dispute, evidence, verification_summary=summary)
+    case = load_case(db, PAYMENT_ID)
+    assert assess_case(case, classify_evidence(case)).supported_outcome == "REQUEST_MORE_EVIDENCE"
+
+
+def test_verified_size_advisory_concedes_remedy(db):
+    dispute = save_dispute(db, reason="MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    save_billing_pack(
+        db,
+        dispute,
+        evidence,
+        contradictions=[{
+            "code": "AUTHORIZED_SIZE_MISMATCH",
+            "type": "CONTRADICTION",
+            "severity": "HIGH",
+            "explanation": "The signed cart differs from the authorized size.",
+            "evidence_ids": ["mandate:man_1", "signed_cart:cart_1"],
+            "source_references": ["/v1/evidence/pay_01"],
+        }],
+    )
+    case = load_case(db, PAYMENT_ID)
+    result = assess_case(case, classify_evidence(case))
+    advisory = next(finding for finding in result.findings if finding.id == "AUTHORIZED_SIZE_MISMATCH")
+    assert result.supported_outcome == "CONCEDE_REMEDY"
+    assert advisory.evidence_ids == ["mandate:man_1", "signed_cart:cart_1"]
+
+
+def test_missing_size_advisory_stays_request_more_evidence(db):
+    dispute = save_dispute(db, reason="MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    save_billing_pack(db, dispute, evidence)
+    case = load_case(db, PAYMENT_ID)
+    assert assess_case(case, classify_evidence(case)).supported_outcome == "REQUEST_MORE_EVIDENCE"
+
+
+def test_simulated_authorisation_defense_is_clearly_labelled(db):
+    dispute = save_dispute(db, reason="UNAUTHORISED", source="SIMULATED_FIXTURE")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    save_billing_pack(db, dispute, evidence)
+    case = load_case(db, PAYMENT_ID)
+    classification = classify_evidence(case)
+    assessment = assess_case(case, classification)
+    plan = ModelPlan(
+        recommendation="DEFEND",
+        confidence=0.9,
+        reasoning_finding_ids=["AUTHORIZATION_CONSENT"],
+        draft_finding_ids=["AUTHORIZATION_CONSENT"],
+    )
+    outcome = draft(assessment, classification, plan, recommend(assessment, plan))
+    assert outcome.recommendation == "DEFEND"
+    assert outcome.executive_summary.startswith("SIMULATED CASE")
+    assert "SIMULATED CASE" in outcome.draft_response
 
 
 def test_invalid_cart_cannot_support_billing_outcome(db):
