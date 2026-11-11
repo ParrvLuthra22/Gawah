@@ -554,7 +554,8 @@ class Runner:
         """DEFEND case = second-to-last PAID payment, CONCEDE case = the last (as Counsel's demo uses
         them). Assert the recommendations; when they are not a defend/concede, print what Counsel was
         given and say what is missing. Never fails the run: the exit code is about the Guardian."""
-        paid = [p for p in await self.api(3, "GET", "/v1/payments") if p["status"] == "PAID"]
+        # PAID, or REFUNDED by scripts/refund_demo.py after Counsel's scenarios ran: still the two cases
+        paid = [p for p in await self.api(3, "GET", "/v1/payments") if p["status"] in ("PAID", "REFUNDED")]
         if len(paid) < 2:
             raise E2EError("fewer than two PAID payments on the engine, so Counsel has nothing to seed")
         for label, pay, want in (("DEFEND", paid[-2], "DEFEND"), ("CONCEDE", paid[-1], "CONCEDE_REMEDY")):

@@ -1,5 +1,7 @@
 """Sandbox card configuration: expiry normalisation, startup refusal, CARD_NOT_CONFIGURED, health."""
 
+import re
+
 import pytest
 from conftest import build_services
 from fastapi.testclient import TestClient
@@ -11,6 +13,14 @@ from world import World
 
 NUMBER, CVV = "4111111111111111", "123"
 SECRET_BITS = (NUMBER, CVV, "12/2030", "2030-12")
+
+
+def leaks(text: str) -> bool:
+    """A secret appears in `text`. The 3-digit CVV is matched as a standalone token: inside a random
+    hex id ("..a123f..") "123" is chance, not a leak, and made this check flaky (about 1 in 100 runs)."""
+    if any(bit in text for bit in SECRET_BITS if bit != CVV):
+        return True
+    return re.search(rf"(?<!\w){CVV}(?!\w)", text) is not None
 
 
 # --- (a) expiry normalisation -----------------------------------------------------------------
@@ -78,7 +88,7 @@ def test_startup_refuses_a_missing_or_malformed_card_without_echoing_values(
         pass
     text = str(e.value)
     assert message in text and "MM/YYYY" in text
-    assert not any(bit in text for bit in SECRET_BITS)
+    assert not leaks(text)
 
 
 def test_startup_does_not_demand_a_card_in_mock_mode_or_without_credentials(real, monkeypatch):
@@ -126,7 +136,7 @@ def test_real_mode_without_a_valid_card_fails_explicitly_and_never_uses_the_brow
     failed = w.entries(type=LedgerEntryType.PAYMENT_FAILED)[0]
     assert failed.data["code"] == "CARD_NOT_CONFIGURED"
     assert failed.data["reason"].startswith("CARD_NOT_CONFIGURED: ")
-    assert not any(bit in str(failed.data) for bit in SECRET_BITS)
+    assert not leaks(str(failed.data))
     b = w.svc.mandates.budget(w.mandate.id)
     assert (b.spent_minor, b.reserved_minor) == (0, 0)  # the budget was released
     assert w.svc.ledger.verify()["ok"]
@@ -147,7 +157,7 @@ def test_health_reports_card_configured_without_revealing_values(real, monkeypat
     with TestClient(app) as c:
         r = c.get("/health")
         assert r.json()["card_configured"] is True
-        assert not any(bit in r.text for bit in SECRET_BITS)
+        assert not leaks(r.text)
     monkeypatch.setattr(settings, "paypal_card_expiry", "")
     monkeypatch.setattr(settings, "paypal_client_id", "")  # allow startup with a bad card
     with TestClient(app) as c:

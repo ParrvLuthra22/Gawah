@@ -16,6 +16,19 @@
           "title": "Id",
           "type": "string"
         },
+        "mandate_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The mandate the proposal was decided against (the proposal's mandate_id). Optional so decisions stored before it existed still validate; set on every new decision.",
+          "title": "Mandate Id"
+        },
         "proposal_id": {
           "title": "Proposal Id",
           "type": "string"

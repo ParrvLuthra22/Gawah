@@ -302,6 +302,7 @@ class Guardian:
         decision = GuardianDecision(
             id=f"dec_{proposal.id}",
             proposal_id=proposal.id,
+            mandate_id=proposal.mandate_id,
             verdict=Verdict.BLOCK if fails else Verdict.ALLOW,
             reasons=reasons,
             explanation=explanation,

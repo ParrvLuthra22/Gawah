@@ -10,7 +10,9 @@
 #      PAID payment, Counsel's CONCEDE case. Counsel's demo reads payments[-2:], so order matters
 #   4. system3/run_demo_scenarios.py (Counsel's simulated dispute cases), then a check of what
 #      Counsel recommended for the two cases (flagged, not fatal, when it is not DEFEND / CONCEDE)
-#   5. the ledger tamper demo, on a COPY of the engine database
+#   5. scripts/refund_demo.py: an operator refund of the CONCEDE payment through the engine
+#      (SANDBOX), right after Counsel's scenarios: budget restored, REFUNDED ledger entry
+#   6. the ledger tamper demo, on a COPY of the engine database
 # then prints the URLs to open. Everything is stopped on exit.
 #
 #   bash scripts/rehearse.sh            (or: make rehearse)
@@ -96,7 +98,7 @@ PIDS+=($!)
     "$PY" -m uvicorn shopper.main:app --host 127.0.0.1 --port "$SHOPPER_PORT" ) >"$WORK/shopper.log" 2>&1 &
 PIDS+=($!)
 COUNSEL_ENV=("DATABASE_URL=sqlite:///$WORK/counsel.db" "SYSTEM2_BASE_URL=$ENGINE_URL"
-  "SYSTEM2_KEY=$SYSTEM3_KEY" "SYSTEM3_KEY=$SYSTEM3_KEY" ENABLE_SANDBOX_RESOLUTION=false)
+  "SYSTEM2_KEY=$SYSTEM3_KEY" "SYSTEM3_KEY=$SYSTEM3_KEY" "ENABLE_SANDBOX_RESOLUTION=${ENABLE_SANDBOX_RESOLUTION:-false}")
 ( cd "$ROOT/system3" && env "${COUNSEL_ENV[@]}" "${COUNSEL_UV[@]}" python -m alembic upgrade head ) \
     >"$WORK/counsel-migrate.log" 2>&1 || { tail -n 15 "$WORK/counsel-migrate.log" >&2; exit 2; }
 ( cd "$ROOT/system3" && export GROQ_API_KEY="$(env_value GROQ_API_KEY)" && exec env "${COUNSEL_ENV[@]}" \
@@ -161,10 +163,17 @@ if counsel_scenarios; then took; else
   if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
 fi
 
+step "4b/6 operator refund of the CONCEDE payment, via the engine (SANDBOX)"
+run "refund demo" env "ENGINE_URL=$ENGINE_URL" "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/refund_demo.py
+
 step "5/6 what Counsel recommended for the two cases"
 # prints Counsel's recommendation per case, and when it is not DEFEND / CONCEDE_REMEDY, the fields
 # Counsel was given and the rule that stopped it. A flag here is a finding, not a failed rehearsal.
 run "counsel recommendations" "$PY" -m integration.e2e --phase counsel-check --counsel-url "http://127.0.0.1:$COUNSEL_PORT"
+
+step "5b/6 probe: Counsel's reasons, the refund path, payment ordering"
+run "rehearse probe" env "ENGINE_URL=$ENGINE_URL" "COUNSEL_URL=http://127.0.0.1:$COUNSEL_PORT" \
+  "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/rehearse_probe.py
 
 step "6/6 ledger tamper demo (on a COPY of the engine database)"
 run "tamper demo" "$PY" scripts/tamper_demo.py --copy-of "$DB" --keys "$ENGINE_KEYS"
