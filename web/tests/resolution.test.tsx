@@ -17,7 +17,7 @@ const workflow: Workflow = {
   evidence: [], verification: { mandate_signature: check, cart_signature: check, ledger: check, engine_ledger: check },
   gaps: [], requests: [], attempts: [], activity: [], approval: null, dispute_status: "OPEN", paypal_status: "OPEN",
   paypal_checked_at: timestamp, submitted_at: null, completed_at: null,
-  plan: { option: { action: "accept-claim", amount_minor: 6500, currency: "USD" },
+  plan: { option: { action: "accept-claim", amount_minor: 6500, currency: "USD", label: null },
     paypal_status: "OPEN", paypal_stage: "CHARGEBACK", capture_id: "CAPTURE123",
     evidence_ids: [], override_reason: null, payload: { accept_claim_type: "REFUND" } },
 };
