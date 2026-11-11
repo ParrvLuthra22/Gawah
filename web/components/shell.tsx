@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleHelp, Cable, ClipboardCheck, FileCheck, FolderOpen, LayoutDashboard, ListChecks, Scale, ShieldCheck } from "lucide-react";
+import { Activity, ShoppingBag, CircleHelp, Cable, ClipboardCheck, FileCheck, FolderOpen, LayoutDashboard, ListChecks, Scale, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const navigation = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/shop", label: "AI Shopper", icon: ShoppingBag },
   { href: "/disputes", label: "Disputes", icon: ListChecks },
   { href: "/evidence", label: "Evidence", icon: FolderOpen },
   { href: "/counsel", label: "AI Counsel", icon: Scale },
