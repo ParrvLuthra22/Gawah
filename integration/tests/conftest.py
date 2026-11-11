@@ -5,6 +5,7 @@ the engine's own SIMULATED PayPal, GAWAH_ENV=test) and System 1's shopper app (w
 Groq). No socket may be opened: an autouse fixture makes any connection attempt an error.
 """
 
+import inspect
 import socket
 
 import httpx
@@ -25,7 +26,18 @@ _SECRETS = ("paypal_client_id", "paypal_client_secret", "paypal_card_number", "p
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
+    original_connect = socket.socket.connect
+
     def refuse(self, address, *args, **kwargs):
+        # Python 3.14's Windows Proactor event loop implements socketpair() by making a
+        # temporary loopback connection. Allow only that stdlib-internal mechanism; the test
+        # harness still rejects every application or external network connection.
+        if (
+            isinstance(address, tuple)
+            and address[0] == "127.0.0.1"
+            and any(frame.function == "_fallback_socketpair" for frame in inspect.stack())
+        ):
+            return original_connect(self, address, *args, **kwargs)
         raise AssertionError(f"test tried to open a network connection to {address!r}")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
