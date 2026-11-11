@@ -6,9 +6,11 @@ import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
+from counsel.clients import PayPalClient
 from counsel.config import Settings
 from counsel.main import create_app
 from counsel.models import CounselAnalysis, Dispute, EvidencePack, Source, now
+from counsel.resolution import disabled_reason
 from fastapi.testclient import TestClient
 from gawah_contract.fixtures import load
 from sqlalchemy.orm import Session
@@ -173,9 +175,12 @@ def n5(tmp_path, monkeypatch):
         "messages": [],
         "outcome": None,
         "system2_failure": False,
+        "forbid_paypal": False,
     }
 
     def paypal(request):
+        if state["forbid_paypal"]:
+            raise AssertionError("Simulated sandbox refunds must not call PayPal.")
         path = request.url.path
         if path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": "mock-token", "expires_in": 3600})
@@ -283,7 +288,7 @@ def test_review_and_execute_exact_approved_version(n5):
     client, _, writes, state = n5
     assert client.get(URL, headers=KEY).status_code == 401
     assert client.post(URL, headers=headers("view"), json={"dispute_id": 1}).status_code == 403
-    assert client.post(URL, headers=headers("alice"), json={"dispute_id": 2}).status_code == 403
+    assert client.post(URL, headers=headers("alice"), json={"dispute_id": 2}).status_code == 409
     assert (
         client.post(URL, headers=headers("alice"), json={"dispute_id": 4}).json()["error"]["code"]
         == "COUNSEL_REQUIRED"
@@ -345,6 +350,42 @@ def test_review_and_execute_exact_approved_version(n5):
         )["total"]
         == 1
     )
+
+
+def test_simulated_concede_refunds_through_system2_without_paypal(n5):
+    client, engine, writes, state = n5
+    with Session(engine) as db:
+        publish(db, 2, version=3, recommendation="CONCEDE_REMEDY")
+    state["forbid_paypal"] = True
+    row = start(client, dispute=2)
+    options = ok(client.get(f"{URL}/{row['id']}/options", headers=headers("alice")))
+    assert options["options"] == [
+        {
+            "action": "refund",
+            "amount_minor": 6500,
+            "currency": "USD",
+            "label": "Simulated dispute, sandbox refund",
+        }
+    ]
+    row = review(client, row, "prepare", action="refund", text="Reviewed refund.")
+    assert row["plan"]["paypal_status"] == "SIMULATED_SANDBOX"
+    row = review(client, row, "approve")
+    result = ok(command_for(client, row, "submit", "sam", confirmation="PP-D-SIM"))
+    assert result["status"] == "CONFIRMED"
+    assert writes == [(f"/v1/payments/{PAYMENT['id']}/refund", {"reason": "Reviewed refund."})]
+
+
+def test_simulated_cases_remain_read_only_when_system2_is_not_local(n5):
+    _, engine, _, _ = n5
+    settings = Settings(
+        _env_file=None,
+        enable_sandbox_resolution=True,
+        system2_base_url="https://system2.example.test",
+    )
+    with httpx.Client() as http, Session(engine) as db:
+        assert disabled_reason(db.get(Dispute, 2), PayPalClient(settings, http)) == (
+            "Simulated disputes are read-only."
+        )
 
 
 def test_assigned_review_and_fresh_inputs_are_required_at_execution(n5):

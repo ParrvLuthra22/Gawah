@@ -197,8 +197,8 @@ def test_legacy_direct_write_requires_resolution_workflow(console):
 def test_legacy_options_label_simulations_and_reject_mock_or_foreign_actions(console):
     client, settings, writes, flags = console
     simulated = "/api/disputes/2/resolution"
-    assert (
-        client.get(simulated, headers=KEY).json()["message"] == "Simulated disputes are read-only."
+    assert client.get(simulated, headers=KEY).json()["message"] == (
+        "No supported resolution action is currently available for this case."
     )
     settings.enable_sandbox_resolution = False
     assert not client.get(CASE, headers=KEY).json()["options"]

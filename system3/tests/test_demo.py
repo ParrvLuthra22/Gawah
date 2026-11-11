@@ -38,8 +38,8 @@ def test_demo_uses_two_latest_real_payments_and_is_idempotent(tmp_path, monkeypa
         lambda _db, _actor, body, **kwargs: opened.append((body.dispute_id, kwargs)) or len(opened),
     )
     with Session(engine) as db:
-        first = demo.run(db, System2(), object())
-        second = demo.run(db, System2(), object())
+        first = demo.run(db, System2(), object(), allow_simulated=True)
+        second = demo.run(db, System2(), object(), allow_simulated=True)
         disputes = db.scalars(select(Dispute).where(Dispute.source == Source.SIMULATED_FIXTURE)).all()
     assert [row.payment_id for row in first] == ["pay-defend", "pay-concede"]
     assert [row.status for row in first] == ["COMPLETED", "COMPLETED"]

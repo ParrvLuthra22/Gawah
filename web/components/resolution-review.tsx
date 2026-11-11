@@ -35,7 +35,7 @@ export function DraftReview({ workflow, options, pending, change }: {
             onChange={event => setAction(event.target.value as Action | "")}>
             <option value="">Choose an available action</option>
             {data.options.map(option => <option key={option.action} value={option.action}>
-              {actionLabels[option.action]}
+              {option.label ?? actionLabels[option.action]}
               {option.amount_minor !== null && ` · ${formatAmount(option.amount_minor, option.currency)}`}
             </option>)}
           </select>
@@ -84,8 +84,10 @@ export function Approval({ workflow, pending, change, canWrite }: {
     && (!workflow.assigned_reviewer || workflow.assigned_reviewer === workflow.actor.id);
   return <Panel title="Approval and submission" detail={<WorkflowBadge status={workflow.status} />}>
     <div className="space-y-4 p-5">
-      <p className="notice amber">{consequences[plan.option.action]}</p>
-      <p className="text-sm"><strong>{actionLabels[plan.option.action]}</strong> · Analysis #{workflow.analysis_id}
+      <p className="notice amber">{plan.option.label === "Simulated dispute, sandbox refund"
+        ? `Simulated dispute, sandbox refund. System 2 issues a full payment refund of ${amount}; no PayPal dispute API is called.`
+        : consequences[plan.option.action]}</p>
+      <p className="text-sm"><strong>{plan.option.label ?? actionLabels[plan.option.action]}</strong> · Analysis #{workflow.analysis_id}
         {" · "}Evidence version {workflow.evidence_version}</p>
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-4 text-sm"
         aria-label="Exact submission payload">{JSON.stringify(plan.payload, null, 2)}</pre>

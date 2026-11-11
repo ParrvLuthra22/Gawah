@@ -41,6 +41,7 @@ class Option(BaseModel):
     action: Action
     amount_minor: int | None = None
     currency: str | None = None
+    label: str | None = None
 
 
 class ResolutionOptions(BaseModel):
@@ -133,13 +134,49 @@ def get_dispute(db: Session, id: int) -> Dispute:
 
 
 def disabled_reason(dispute: Dispute, paypal: PayPalClient) -> str | None:
-    if dispute.source != Source.PAYPAL_API:
+    if dispute.source == Source.SIMULATED_FIXTURE:
+        if paypal.settings.local_sandbox_resolution:
+            return None
         return "Simulated disputes are read-only."
+    if dispute.source != Source.PAYPAL_API:
+        return "This dispute source is read-only."
     if not paypal.settings.enable_sandbox_resolution:
         return "Sandbox resolution is disabled."
     if not paypal.configured:
         return "PayPal Sandbox credentials are missing."
     return None
+
+
+def simulated_system2_payment(system2: System2Client, dispute: Dispute) -> PaymentRecord | None:
+    """Load the only financial source permitted for a simulated dispute: System 2."""
+    payment_id = dispute.payment_id
+    if (
+        dispute.link_status != "LINKED"
+        or not payment_id
+        or not re.fullmatch(REFERENCE_PATTERN, payment_id)
+    ):
+        return None
+    payment = system2_record(system2, f"/v1/payments/{payment_id}", TypeAdapter(PaymentRecord))
+    capture = payment.paypal_capture_id
+    if (
+        payment.id != payment_id
+        or not capture
+        or capture.upper().startswith(("FAKE", "SIMULATED"))
+    ):
+        return None
+    return payment
+
+
+def simulated_refund_option(system2: System2Client, dispute: Dispute) -> Option | None:
+    payment = simulated_system2_payment(system2, dispute)
+    if payment is None or payment.status != PaymentStatus.PAID or payment.amount_minor <= 0:
+        return None
+    return Option(
+        action="refund",
+        amount_minor=payment.amount_minor,
+        currency=payment.currency,
+        label="Simulated dispute, sandbox refund",
+    )
 
 
 def current_case(paypal: PayPalClient, dispute: Dispute) -> SandboxCase:
@@ -294,12 +331,23 @@ def get_options(
     ).all()
     options = []
     if not reason:
-        case = current_case(paypal, dispute)
-        options = [
-            option
-            for option in candidates(system2, dispute, case)
-            if not conflicting_attempt(db, id, option.action, case.capture_id)
-        ]
+        if dispute.source == Source.SIMULATED_FIXTURE:
+            try:
+                option = simulated_refund_option(system2, dispute)
+            except IntegrationError:
+                option = None
+            options = (
+                [option]
+                if option and not conflicting_attempt(db, id, option.action, None)
+                else []
+            )
+        else:
+            case = current_case(paypal, dispute)
+            options = [
+                option
+                for option in candidates(system2, dispute, case)
+                if not conflicting_attempt(db, id, option.action, case.capture_id)
+            ]
         if not options:
             reason = "No supported resolution action is currently available for this case."
     return ResolutionOptions(options=options, attempts=attempts, message=reason)
@@ -316,8 +364,19 @@ class ActionPlan(BaseModel):
 
 
 def eligible_option(
-    system2: System2Client, dispute: Dispute, case: SandboxCase, action: Action
+    system2: System2Client, dispute: Dispute, case: SandboxCase | None, action: Action
 ) -> Option:
+    if dispute.source == Source.SIMULATED_FIXTURE:
+        option = simulated_refund_option(system2, dispute)
+        if option and action == option.action:
+            return option
+        raise IntegrationError(
+            "ACTION_UNAVAILABLE",
+            "Only a paid System 2 sandbox refund is available for this simulated dispute.",
+            409,
+        )
+    if case is None:
+        raise IntegrationError("ACTION_UNAVAILABLE", "PayPal case details are unavailable.", 409)
     for option in candidates(system2, dispute, case):
         if option.action == action:
             return option

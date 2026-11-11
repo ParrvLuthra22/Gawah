@@ -1,12 +1,13 @@
 from datetime import timedelta
 from uuid import uuid4
 
+from gawah_contract import PaymentStatus
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .clients import IntegrationError, PayPalClient, System2Client
-from .models import ResolutionAttempt, now
+from .models import ResolutionAttempt, Source, now
 from .resolution import (
     ActionPlan,
     confirmed_by_upstream,
@@ -16,6 +17,7 @@ from .resolution import (
     execute_action,
     get_dispute,
     matching_text_times,
+    simulated_system2_payment,
 )
 from .resolution_auth import Actor
 from .resolution_schemas import Revision, SubmitWorkflow
@@ -63,28 +65,46 @@ def submit(
     payment_id = row.payment_id
     db.expunge(dispute)
     db.rollback()
-    case = current_case(paypal, dispute)
-    option = eligible_option(system2, dispute, case, plan.option.action)
-    if (
-        case.status != plan.paypal_status
-        or case.dispute_life_cycle_stage != plan.paypal_stage
-        or case.capture_id != plan.capture_id
-        or option != plan.option
-    ):
-        reject(
-            "PAYPAL_CASE_CHANGED",
-            "PayPal status, capture, or terms changed. Prepare and approve a new package.",
-        )
-    if matching_text_times(case, plan):
-        reject(
-            "RESPONSE_ALREADY_RECORDED",
-            "PayPal already shows the same seller response. Review the case before continuing.",
-        )
+    if dispute.source == Source.SIMULATED_FIXTURE:
+        payment = simulated_system2_payment(system2, dispute)
+        option = eligible_option(system2, dispute, None, plan.option.action)
+        if (
+            payment is None
+            or payment.status.value != "PAID"
+            or plan.paypal_status != "SIMULATED_SANDBOX"
+            or plan.paypal_stage != "SYSTEM_2"
+            or payment.paypal_capture_id != plan.capture_id
+            or option != plan.option
+        ):
+            reject(
+                "SYSTEM2_PAYMENT_CHANGED",
+                "System 2 payment details changed. Prepare and approve a new package.",
+            )
+        capture_id, provider_status = payment.paypal_capture_id, "SIMULATED_SANDBOX"
+    else:
+        case = current_case(paypal, dispute)
+        option = eligible_option(system2, dispute, case, plan.option.action)
+        if (
+            case.status != plan.paypal_status
+            or case.dispute_life_cycle_stage != plan.paypal_stage
+            or case.capture_id != plan.capture_id
+            or option != plan.option
+        ):
+            reject(
+                "PAYPAL_CASE_CHANGED",
+                "PayPal status, capture, or terms changed. Prepare and approve a new package.",
+            )
+        if matching_text_times(case, plan):
+            reject(
+                "RESPONSE_ALREADY_RECORDED",
+                "PayPal already shows the same seller response. Review the case before continuing.",
+            )
+        capture_id, provider_status = case.capture_id, case.status
 
     lock(db)
     row = get_workflow(db, id, body.revision)
     require_fresh(db, row, get_dispute(db, row.dispute_id))
-    if conflicting_attempt(db, row.dispute_id, option.action, case.capture_id):
+    if conflicting_attempt(db, row.dispute_id, option.action, capture_id):
         reject(
             "ALREADY_ATTEMPTED",
             "A prior submission blocks this action. Reconcile it before proceeding.",
@@ -92,7 +112,7 @@ def submit(
     attempt = ResolutionAttempt(
         workflow_id=id,
         dispute_id=row.dispute_id,
-        capture_id=case.capture_id,
+        capture_id=capture_id,
         action=option.action,
         request_id=uuid4().hex,
         status="RUNNING",
@@ -100,7 +120,7 @@ def submit(
     )
     db.add(attempt)
     db.flush()
-    row.paypal_status, row.paypal_checked_at = case.status, now()
+    row.paypal_status, row.paypal_checked_at = provider_status, now()
     record(
         db,
         row,
@@ -119,7 +139,9 @@ def submit(
     response_reference = None
     details = {}
     try:
-        response_reference = execute_action(paypal, system2, case.dispute_id, payment_id, plan)
+        response_reference = execute_action(
+            paypal, system2, dispute.paypal_dispute_id, payment_id, plan
+        )
         result = "SUCCEEDED"
         status = "CONFIRMED" if option.action == "refund" else "SUBMITTED"
     except (IntegrationError, ValidationError) as exc:
@@ -193,6 +215,43 @@ def reconcile(
             "SUBMISSION_IN_PROGRESS",
             "Wait for the original submission to finish before reconciling.",
         )
+    if dispute.source == Source.SIMULATED_FIXTURE:
+        payment = simulated_system2_payment(system2, dispute)
+        confirmed = bool(
+            payment
+            and payment.status == PaymentStatus.REFUNDED
+            and payment.paypal_capture_id == plan.capture_id
+            and (payment.amount_minor, payment.currency)
+            == (plan.option.amount_minor, plan.option.currency)
+        )
+        attempt_id = attempt.id
+        lock(db)
+        row = get_workflow(db, id, body.revision)
+        attempt = db.get(ResolutionAttempt, attempt_id)
+        checked = now()
+        row.paypal_status, row.paypal_checked_at = "SIMULATED_SANDBOX", checked
+        status = row.status
+        if confirmed:
+            status = "CONFIRMED"
+            attempt.status = "SUCCEEDED"
+            attempt.response_reference = attempt.response_reference or plan.capture_id
+            attempt.finished_at = attempt.finished_at or checked
+            row.submitted_at = row.submitted_at or attempt.created_at
+            row.completed_at = checked
+        elif status == "SUBMITTING":
+            status = "UNKNOWN"
+            attempt.status, attempt.finished_at = "UNKNOWN", checked
+        record(
+            db,
+            row,
+            actor,
+            "SYSTEM2_REFUND_RECONCILED",
+            status,
+            confirmed=confirmed,
+            attempt_id=attempt.id,
+        )
+        db.commit()
+        return
     attempt_id = attempt.id
     db.expunge(dispute)
     db.expunge(attempt)

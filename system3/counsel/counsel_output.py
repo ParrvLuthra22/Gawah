@@ -10,6 +10,12 @@ from .counsel_schemas import (
 
 
 def recommend(assessment: CaseAssessment, plan: ModelPlan) -> CounselDecision:
+    if assessment.supported_outcome in {"DEFEND", "CONCEDE_REMEDY"}:
+        # Evidence assessment, not the generative model, controls decisive outcomes. The model
+        # still selects findings for wording, while draft() always includes the decisive finding.
+        return CounselDecision(
+            recommendation=assessment.supported_outcome, confidence=plan.confidence
+        )
     if plan.recommendation == "REQUEST_MORE_EVIDENCE":
         return CounselDecision(recommendation=plan.recommendation, confidence=plan.confidence)
     if plan.recommendation != assessment.supported_outcome:
@@ -74,6 +80,23 @@ def draft(
         "CONCEDE_REMEDY": "We acknowledge the recorded price difference and propose reviewing an appropriate remedy.",
         "REQUEST_MORE_EVIDENCE": assessment.documentation_needed,
     }
+    if assessment.dispute_reason == "UNAUTHORISED" and decision.recommendation == "DEFEND":
+        summaries["DEFEND"] = "Recommend defending the unauthorized-transaction claim using verified consent evidence."
+        replies["DEFEND"] = (
+            "The signed mandate, Guardian approval, and verified payment record show consent "
+            "for this transaction."
+        )
+    if (
+        assessment.dispute_reason == "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"
+        and decision.recommendation == "CONCEDE_REMEDY"
+    ):
+        summaries["CONCEDE_REMEDY"] = (
+            "Recommend a full refund for the verified authorized-size mismatch."
+        )
+        replies["CONCEDE_REMEDY"] = (
+            "We acknowledge the verified difference between the mandate and signed cart and "
+            "recommend a full refund."
+        )
     draft_lines = []
     for finding in draft_findings:
         sources = {trust[ref].source_type for ref in finding.evidence_ids}
