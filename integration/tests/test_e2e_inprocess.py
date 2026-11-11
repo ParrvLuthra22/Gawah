@@ -272,3 +272,22 @@ def test_amain_refuses_a_hosted_engine_before_touching_the_network(capsys):
     code = asyncio.run(e2e.amain(["--engine-url", "https://gawah-engine.onrender.com"], env={}))
     assert code == 2
     assert "E2E_CONFIRM_REMOTE=1" in capsys.readouterr().err
+
+
+def test_explain_counsel_reports_a_failed_analysis_instead_of_a_type_error(
+        engine_app_ref, stubbed_shopper, merchant):
+    """A FAILED Counsel analysis (the model's rate limit) has outcome None: say so, do not crash."""
+    lines: list[str] = []
+
+    async def go():
+        async with clients(engine_app_ref, stubbed_shopper) as (engine, shopper):
+            runner = e2e.Runner(engine, shopper, s1_key=S1_KEY, s3_key=S3_KEY, merchant=merchant,
+                                out=lines.append)
+            failed = {"analysis_status": "FAILED", "outcome": None,
+                      "error": {"code": "COUNSEL_RATE_LIMITED", "message": "Groq is rate limited. Try again later."}}
+            await runner.explain_counsel("CONCEDE", {"id": "pay_x"}, failed, "CONCEDE_REMEDY")
+            return runner.report.flags
+
+    flags = asyncio.run(go())
+    assert any("analysis FAILED: COUNSEL_RATE_LIMITED: Groq is rate limited" in line for line in lines)
+    assert any("CONCEDE analysis FAILED" in f for f in flags)

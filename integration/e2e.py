@@ -570,6 +570,12 @@ class Runner:
 
     async def explain_counsel(self, label: str, pay: dict[str, Any], analysis: dict[str, Any],
                               want: str) -> None:
+        if not analysis.get("outcome"):  # a FAILED analysis (e.g. the model's rate limit) has no outcome
+            err = analysis.get("error") or {}
+            self.out(f"  -- {label}: analysis FAILED: "
+                     f"{err.get('code') or 'no reason given'}: {err.get('message') or 'no outcome'}")
+            self.report.flags.append(f"Counsel {label} analysis FAILED: {err.get('code') or 'no reason given'}")
+            return
         bundle = await self.api(3, "GET", f"/v1/evidence/{pay['id']}")
         entries = bundle["ledger_entries"]
         decision = next((e for e in entries if e["type"] == "DECISION_MADE"), {"data": {}})

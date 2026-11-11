@@ -162,6 +162,11 @@ if counsel_scenarios; then took; else
   sleep 30
   if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
 fi
+# run_demo_scenarios.py exits 0 even when an analysis FAILED (the model's rate limit shows up as
+# COUNSEL_RATE_LIMITED), so ask Counsel for each analysis. A FAILED one is re-triggered once after 45s;
+# this step fails the rehearsal, with the reason printed, if it is still FAILED.
+run "counsel analyses" env "ENGINE_URL=$ENGINE_URL" "COUNSEL_URL=http://127.0.0.1:$COUNSEL_PORT" \
+  "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/counsel_analysis_check.py --wait 45
 
 step "4a/6 does Counsel's API offer a refund for the CONCEDE case? (before the engine refund)"
 run "refund option probe" env "ENGINE_URL=$ENGINE_URL" "COUNSEL_URL=http://127.0.0.1:$COUNSEL_PORT" \
