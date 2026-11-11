@@ -20,5 +20,18 @@ class DemoCatalogProvider:
             raise ProductProviderError("Demo catalog is unavailable") from exc
 
 
+class PurchasableDemoCatalogProvider(DemoCatalogProvider):
+    """Demo-checkout view: only merchant-stocked catalog IDs are selectable."""
+
+    name = "demo-merchant"
+
+    def __init__(self, purchasable_ids: set[str]) -> None:
+        self._purchasable_ids = purchasable_ids
+
+    async def list_products(self, intent: ShoppingIntent) -> list[Product]:
+        products = await super().list_products(intent)
+        return [product for product in products if product.id in self._purchasable_ids]
+
+
 class ProductProviderError(RuntimeError):
     """A configured product provider could not return catalog data."""

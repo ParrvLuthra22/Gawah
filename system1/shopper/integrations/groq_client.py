@@ -69,6 +69,7 @@ class GroqIntentClient:
 
     def __init__(self, settings: Settings) -> None:
         self._configured_model = settings.groq_model.strip()
+        self._api_key_configured = bool(settings.groq_api_key.strip())
         self._client = AsyncGroq(api_key=settings.groq_api_key, timeout=15.0, max_retries=0)
         self._cached_models: tuple[str, ...] | None = None
         self._models_cached_at = 0.0
@@ -117,6 +118,8 @@ class GroqIntentClient:
             return self._cached_models
 
     async def _candidate_models(self) -> tuple[str, ...]:
+        if not self._api_key_configured:
+            raise GroqAuthenticationError("Groq API key is not configured")
         if not self.is_auto_model_selection:
             # An explicit model is deliberately not replaced by automatic selection.
             return (self._configured_model,)

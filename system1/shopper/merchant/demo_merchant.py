@@ -64,6 +64,10 @@ class DemoMerchantAdapter:
         """Public demo catalog only; signing material remains private to this adapter."""
         return list(self._products().values())
 
+    def purchasable_product_ids(self) -> set[str]:
+        """Merchant authority over what a demo checkout agent may select."""
+        return {product.product_id for product in self._products().values() if product.stock > 0}
+
     def verify_product(
         self, product_id: str, expected_merchant_id: str, quantity: int
     ) -> MerchantProduct:
@@ -137,7 +141,10 @@ class ProposalPreparationService:
             mandate_id=request.mandate_id,
             agent_id=request.agent_id,
             merchant_id=product.merchant_id,
-            product=ContractProduct(id=product.product_id, title=product.title, url=product.url),
+            # Guardian compares ContractProduct.id with the signed cart line SKU.
+            # The demo catalog ID selects merchant inventory, while the proposal
+            # carries the merchant-authoritative SKU used in the signed cart.
+            product=ContractProduct(id=product.sku, title=product.title, url=product.url),
             quantity=request.quantity,
             unit_price_minor=product.unit_price_minor,
             currency=product.currency,

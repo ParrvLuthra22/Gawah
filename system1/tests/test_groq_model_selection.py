@@ -150,3 +150,10 @@ def test_tool_completion_disables_parallel_calls_for_gpt_oss() -> None:
 
     assert completions.calls == [MODEL_PRIORITY[0]]
     assert completions.request_kwargs[0]["parallel_tool_calls"] is False
+
+
+def test_missing_groq_key_allows_settings_but_rejects_ai_requests() -> None:
+    client = GroqIntentClient(Settings(groq_api_key=""))
+
+    with pytest.raises(GroqAuthenticationError, match="not configured"):
+        complete(client)

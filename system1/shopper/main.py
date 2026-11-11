@@ -24,7 +24,7 @@ from shopper.merchant.demo_merchant import (
 from shopper.models.product import DiscoveryResult
 from shopper.models.shopping_intent import ShoppingIntent
 from shopper.providers.channel3 import Channel3ProviderError
-from shopper.providers.demo_catalog import DemoCatalogProvider, ProductProviderError
+from shopper.providers.demo_catalog import ProductProviderError, PurchasableDemoCatalogProvider
 from shopper.security.attack_simulation import AttackRequest, AttackResult, run_attack
 from shopper.services.demo_workflow import (
     DemoShoppingRequest,
@@ -76,7 +76,9 @@ def get_shopping_agent() -> ShoppingAgent:
 @lru_cache
 def get_demo_shopping_agent() -> ShoppingAgent:
     """An explicit demo catalog agent; never a fallback for Channel3."""
-    return ShoppingAgent(settings=Settings(), discovery_service=DiscoveryService(DemoCatalogProvider()))
+    merchant = DemoMerchantAdapter(Settings())
+    provider = PurchasableDemoCatalogProvider(merchant.purchasable_product_ids())
+    return ShoppingAgent(settings=Settings(), discovery_service=DiscoveryService(provider))
 
 
 @lru_cache

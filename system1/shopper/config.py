@@ -11,7 +11,10 @@ ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 class Settings(BaseSettings):
     """Settings loaded from process environment, falling back to the root .env file."""
 
-    groq_api_key: str
+    # Configuration-only operations (merchant preparation, health and discovery)
+    # must not require an AI credential. GroqIntentClient rejects actual AI calls
+    # with a clear authentication error when this remains empty.
+    groq_api_key: str = ""
     # "auto" discovers currently enabled Groq models and uses the approved priority list.
     groq_model: str = "auto"
     product_provider: Literal["demo", "channel3"] = "demo"

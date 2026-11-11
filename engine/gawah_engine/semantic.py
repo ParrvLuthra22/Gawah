@@ -191,6 +191,11 @@ def keyword_check(
         return SemanticResult(category_match="mismatch", confidence=0.85, source="fallback")
     if statuses and all(s == "match" for s in statuses):
         return SemanticResult(category_match="match", confidence=0.9, source="fallback")
+    # With no model available, a restrictive known category must fail closed:
+    # an unrecognised cart line is not evidence that it belongs to footwear (or
+    # another mandate group). Unknown mandates retain the prior advisory result.
+    if group is not None:
+        return SemanticResult(category_match="mismatch", confidence=0.85, source="fallback")
     return SemanticResult(category_match="unclear", confidence=0.3, source="fallback")
 
 
