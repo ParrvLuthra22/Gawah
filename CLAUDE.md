@@ -9,8 +9,9 @@ PayPal pays, a signed hash-chained ledger records everything. Details: `docs/CON
   - System 1 (shopper agent, demo store): `system1/`
   - System 2 (engine, Guardian, payments, ledger): `engine/`, `contract/`, `scripts/`, `docs/`
   - System 3 (Dispute Counsel, dashboard): `system3/`, `web/`
-- Anything in `contract/` must be additive (new models, new optional fields, new enum values)
-  and listed in `docs/CONTRACT.md`. Regenerate schemas with `make contract`.
+- Changes to `contract/` that are additive and optional (new models, new optional fields, new enum values) are
+  allowed: list them in `docs/CONTRACT.md`, regenerate schemas with `make contract`, and announce them to the
+  other two owners. Breaking changes need all three owners to agree.
 
 ## 2. Secrets
 - Never commit secrets, keys, `.env` or `.db` files. Keys live in gitignored `keys/` dirs.

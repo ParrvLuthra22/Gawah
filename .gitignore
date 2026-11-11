@@ -24,6 +24,8 @@ npm-debug.log*
 *.db-journal
 keys/
 *.pem
+*.key
+*.sqlite
 
 # OS / editor
 .DS_Store
@@ -32,3 +34,9 @@ keys/
 
 # Spike output (screenshots, logs)
 spikes/out/
+
+# Logs, coverage, build info
+*.log
+.coverage
+htmlcov/
+*.tsbuildinfo

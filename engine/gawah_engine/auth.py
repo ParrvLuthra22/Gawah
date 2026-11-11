@@ -109,7 +109,3 @@ def require_service_key(request: Request) -> str:
     request.state.service = service
     return service
 
-
-def require_mock() -> None:
-    if not settings.gawah_mock:
-        raise GawahError(501, "NOT_IMPLEMENTED", "Real logic is not implemented yet; set GAWAH_MOCK=1")

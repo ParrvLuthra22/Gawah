@@ -192,12 +192,6 @@ def check_merchant_key(k: MerchantKey) -> None:
     p.raise_if_any()
 
 
-def check_path_id(name: str, value: str) -> None:
-    p = _Problems()
-    p.ident(name, value)
-    p.raise_if_any()
-
-
 # ---- ASGI middleware -----------------------------------------------------------------------
 
 

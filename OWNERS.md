@@ -11,4 +11,6 @@ Shared: `contract/` (models, schemas, fixtures) and `docs/CONTRACT.md`.
 ## Rules
 
 - Only edit your own system's directories.
-- Anything in `contract/` needs all three of us to agree before it merges.
+- Additive, optional-field changes to `contract/` (new models, new optional fields, new enum values) are
+  allowed: list them in `docs/CONTRACT.md` and announce them to the other two owners. Breaking changes need
+  all three of us to agree before they merge.

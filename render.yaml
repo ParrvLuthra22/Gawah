@@ -118,7 +118,7 @@ services:
   #   envVars:
   #     - key: PYTHON_VERSION
   #       value: 3.12.8
-  #     - key: GROQ_API_KEY         # System 1's Settings requires it
+  #     - key: GROQ_API_KEY         # optional: Settings no longer requires it (issue #10); needed only for real AI calls
   #       sync: false
   #     - key: MERCHANT_SIGNING_KEY_PATH   # default keys/system1-merchant is wiped on every restart
   #       value: /var/data/system1-merchant  # needs a persistent disk (paid plan) to be meaningful

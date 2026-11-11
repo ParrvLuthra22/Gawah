@@ -5,9 +5,8 @@ System 2 does not edit those directories; each item says who needs to act.
 
 ## Checks that came back clean (2026-11-10, after merging System 3)
 
-- `pytest` (engine + contract): 425 passed, 1 skipped before this work; `ruff check .` clean.
-- System 3 tests (Counsel, Python 3.14 and 3.12): 77 passed.
-- `web`: `npx vitest run` 28 passed; `npm run build` succeeds.
+- Run `make test` for current results (engine and contract, Counsel and web tests) and `make lint` for ruff.
+  Counts are not recorded here because they go stale.
 - **No key can reach a browser.** `grep` over `web/` (excluding `node_modules` and `.next`) for
   `NEXT_PUBLIC`, `SYSTEM3_KEY`, `X-Gawah-Key` and `process.env`: no `NEXT_PUBLIC_` variable exists;
   `SYSTEM3_KEY` is read only in the server route `web/app/api/[...segments]/route.ts` (and tests);
