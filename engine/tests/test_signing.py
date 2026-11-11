@@ -1,6 +1,5 @@
-import stat
-
 import pytest
+from gawah_engine.key_permissions import private_key_path_is_secure
 from gawah_engine.signing import ES256Signer
 
 
@@ -74,8 +73,8 @@ def test_purposes_do_not_cross_verify(tmp_path):
 
 def test_private_key_files_are_owner_only(signer, tmp_path):
     pem = tmp_path / "keys" / "t-key-1.pem"
-    assert stat.S_IMODE(pem.stat().st_mode) == 0o600
-    assert stat.S_IMODE(pem.parent.stat().st_mode) == 0o700
+    assert private_key_path_is_secure(pem)
+    assert private_key_path_is_secure(pem.parent, directory=True)
 
 
 def test_key_path_must_be_a_directory(tmp_path):

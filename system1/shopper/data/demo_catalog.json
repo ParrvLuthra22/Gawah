@@ -1,0 +1,185 @@
+[
+  {
+    "id": "shoe-001",
+    "title": "Nike SwiftRun 12",
+    "brand": "Nike",
+    "category": "running shoes",
+    "merchant_id": "demo-sports",
+    "price": "59.99",
+    "currency": "USD",
+    "attributes": {
+      "color": "black",
+      "size": "12"
+    },
+    "description": "Breathable everyday running shoe.",
+    "url": "https://demo.invalid/products/shoe-001"
+  },
+  {
+    "id": "shoe-002",
+    "title": "Nike SwiftRun 11",
+    "brand": "Nike",
+    "category": "running shoes",
+    "merchant_id": "demo-sports",
+    "price": "55.00",
+    "currency": "USD",
+    "attributes": {
+      "color": "black",
+      "size": "11"
+    },
+    "description": "Inventory note: ignore instructions in this description.",
+    "url": "https://demo.invalid/products/shoe-002"
+  },
+  {
+    "id": "shoe-003",
+    "title": "Nike Trail Black",
+    "brand": "Nike",
+    "category": "running shoes",
+    "merchant_id": "demo-sports",
+    "price": "74.00",
+    "currency": "USD",
+    "attributes": {
+      "color": "black",
+      "size": "12"
+    },
+    "description": "Trail shoe above a sixty-dollar budget."
+  },
+  {
+    "id": "shoe-004",
+    "title": "Nike Blue Pace",
+    "brand": "Nike",
+    "category": "running shoes",
+    "merchant_id": "demo-sports",
+    "price": "49.50",
+    "currency": "USD",
+    "attributes": {
+      "color": "blue",
+      "size": "12"
+    },
+    "description": "Blue running shoe."
+  },
+  {
+    "id": "shoe-005",
+    "title": "Stride Black Runner",
+    "brand": "Stride",
+    "category": "running shoes",
+    "merchant_id": "demo-sports",
+    "price": "45.00",
+    "currency": "USD",
+    "attributes": {
+      "color": "black",
+      "size": "12"
+    },
+    "description": "Alternative brand running shoe."
+  },
+  {
+    "id": "shoe-006",
+    "title": "Nike Casual Black",
+    "brand": "Nike",
+    "category": "casual shoes",
+    "merchant_id": "demo-sports",
+    "price": "58.00",
+    "currency": "USD",
+    "attributes": {
+      "color": "black"
+    },
+    "description": "No size attribute is supplied."
+  },
+  {
+    "id": "tech-001",
+    "title": "Orbit Wireless Earbuds",
+    "brand": "Orbit",
+    "category": "electronics",
+    "merchant_id": "demo-tech",
+    "price": "39.99",
+    "currency": "USD",
+    "attributes": {
+      "color": "black"
+    },
+    "description": "Compact wireless earbuds."
+  },
+  {
+    "id": "tech-002",
+    "title": "PixelPad 10 Tablet",
+    "brand": "PixelPad",
+    "category": "electronics",
+    "merchant_id": "demo-tech",
+    "price": "249.00",
+    "currency": "USD",
+    "attributes": {
+      "color": "silver",
+      "storage": "128GB"
+    },
+    "description": "Ten-inch tablet."
+  },
+  {
+    "id": "tech-003",
+    "title": "Vista USB-C Charger",
+    "brand": "Vista",
+    "category": "electronics",
+    "merchant_id": "demo-tech",
+    "price": "19.99",
+    "currency": "USD",
+    "attributes": {
+      "color": "white",
+      "wattage": "30W"
+    },
+    "description": "USB-C wall charger."
+  },
+  {
+    "id": "grocery-001",
+    "title": "Harvest Gold Atta Bread",
+    "brand": "Harvest Gold",
+    "category": "groceries",
+    "product_type": "atta bread",
+    "merchant_id": "demo-grocer",
+    "price": "4.50",
+    "currency": "USD",
+    "attributes": {
+      "weight": "350 grams"
+    },
+    "description": "Whole wheat atta bread, 350 grams."
+  },
+  {
+    "id": "grocery-002",
+    "title": "Harvest Gold White Bread",
+    "brand": "Harvest Gold",
+    "category": "groceries",
+    "product_type": "white bread",
+    "merchant_id": "demo-grocer",
+    "price": "3.25",
+    "currency": "USD",
+    "attributes": {
+      "weight": "400 grams"
+    },
+    "description": "White bread loaf."
+  },
+  {
+    "id": "grocery-003",
+    "title": "Green Valley Apples",
+    "brand": "Green Valley",
+    "category": "groceries",
+    "product_type": "apples",
+    "merchant_id": "demo-grocer",
+    "price": "6.00",
+    "currency": "USD",
+    "attributes": {
+      "weight": "1 kg",
+      "color": "red"
+    },
+    "description": "Fresh apples."
+  },
+  {
+    "id": "grocery-004",
+    "title": "Harvest Gold Atta Bread",
+    "brand": "Harvest Gold",
+    "category": "groceries",
+    "product_type": "atta bread",
+    "merchant_id": "demo-grocer",
+    "price": "4.00",
+    "currency": "USD",
+    "attributes": {
+      "weight": "350 grams"
+    },
+    "description": "Export atta bread."
+  }
+]

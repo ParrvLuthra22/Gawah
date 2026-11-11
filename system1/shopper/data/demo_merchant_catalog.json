@@ -1,0 +1,6 @@
+[
+  {"product_id":"shoe-001","sku":"NIKE-SWIFTRUN-12-BLK","title":"Nike SwiftRun 12","url":"https://demo.invalid/products/shoe-001","merchant_id":"demo-sports","unit_price_minor":5999,"currency":"USD","stock":8,"variant":"size 12"},
+  {"product_id":"shoe-002","sku":"NIKE-SWIFTRUN-11-BLK","title":"Nike SwiftRun 11","url":"https://demo.invalid/products/shoe-002","merchant_id":"demo-sports","unit_price_minor":5500,"currency":"USD","stock":0,"variant":"size 11"},
+  {"product_id":"grocery-001","sku":"HG-ATTA-350","title":"Harvest Gold Atta Bread","url":"https://demo.invalid/products/grocery-001","merchant_id":"demo-grocer","unit_price_minor":450,"currency":"USD","stock":20,"variant":"350 grams"},
+  {"product_id":"grocery-004","sku":"HG-ATTA-350-EXPORT","title":"Harvest Gold Atta Bread","url":"https://demo.invalid/products/grocery-004","merchant_id":"demo-grocer","unit_price_minor":400,"currency":"USD","stock":15,"variant":"350 grams"}
+]

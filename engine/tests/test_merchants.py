@@ -1,7 +1,6 @@
 import base64
 import importlib.util
 import json
-import stat
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,7 @@ from gawah_contract.carts import generate_keypair, public_key_pem, verify_cart
 from gawah_contract.fixtures import load
 from gawah_engine.config import settings
 from gawah_engine.errors import GawahError
+from gawah_engine.key_permissions import private_key_path_is_secure
 from gawah_engine.main import app
 
 H = {"X-Gawah-Key": "real-key"}
@@ -113,7 +113,8 @@ def test_dev_merchant_key_is_private_reused_and_signs_carts(tmp_path, svc):
     dm = _load_dev_merchant()
     key = dm.load_or_create_key(tmp_path / "k")
     pem = tmp_path / "k" / "demo-shoe-store-key-1.pem"
-    assert stat.S_IMODE(pem.stat().st_mode) == 0o600
+    assert private_key_path_is_secure(pem)
+    assert private_key_path_is_secure(pem.parent, directory=True)
     assert dm.load_or_create_key(tmp_path / "k").private_numbers() == key.private_numbers()
     svc.merchants.register(dm.merchant_key_body(key))
     stored = svc.merchants.get("demo-shoe-store", "demo-shoe-store-key-1")

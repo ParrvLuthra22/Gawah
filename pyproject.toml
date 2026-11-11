@@ -27,8 +27,8 @@ build-backend = "hatchling.build"
 packages = ["engine/gawah_engine"]
 
 [tool.pytest.ini_options]
-testpaths = ["engine/tests", "contract/tests"]
-pythonpath = ["engine"]
+testpaths = ["engine/tests", "contract/tests", "integration/tests"]
+pythonpath = ["engine", "."]
 markers = ["live: talks to the real PayPal sandbox; runs only with GAWAH_LIVE=1"]
 
 [tool.ruff]
@@ -36,12 +36,14 @@ line-length = 100
 extend-exclude = ["web"]
 
 [tool.uv.workspace]
-members = ["contract"]
+members = ["contract", "system1"]
 
 [tool.uv.sources]
 gawah-contract = { workspace = true }
+gawah-shopper = { workspace = true }
 
 [dependency-groups]
 dev = [
     "playwright>=1.64.1",
+    "gawah-shopper",  # integration/ imports the shopper (System 1) in-process
 ]

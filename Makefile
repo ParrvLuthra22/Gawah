@@ -1,4 +1,4 @@
-.PHONY: install dev-engine dev-counsel dev-web dev-all test lint smoke-remote
+.PHONY: install dev-engine dev-counsel dev-web dev-all test lint smoke-remote e2e rehearse
 
 COUNSEL_UV = uv run --no-project --with-requirements requirements.txt --with-editable ../contract
 
@@ -34,6 +34,17 @@ smoke-remote:
 
 lint:
 	uv run ruff check .
+
+# End to end: shopper -> signed proposal -> engine Guardian -> payment -> ledger. Starts both
+# services, runs integration/e2e.py, stops them. Real Guardian and ledger, SIMULATED PayPal and Groq,
+# no network. `make e2e E2E_MODE=mock` uses the mock engine; `E2E_LIVE_GROQ=1` the real Groq.
+e2e:
+	bash scripts/e2e.sh
+
+# The full demo in video order (real PayPal sandbox payment, attacks, Counsel scenarios, ledger tamper
+# demo on a copy). Starts engine, shopper, Counsel and web; stops them on exit. Needs .env and network.
+rehearse:
+	bash scripts/rehearse.sh
 
 .PHONY: contract
 contract:

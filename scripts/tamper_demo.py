@@ -1,13 +1,19 @@
 """Tamper demo: show that editing a ledger entry directly in SQLite is detected.
 
     uv run python scripts/tamper_demo.py
+    uv run python scripts/tamper_demo.py --copy-of PATH/engine.db --keys PATH/engine-keys
 
-Uses a throwaway database and throwaway keys in a temp directory; touches nothing else.
+Default: uses a throwaway database and throwaway keys in a temp directory; touches nothing else.
+With --copy-of: takes a consistent COPY (SQLite backup API, safe while an engine is running) of a
+real ledger database and its key directory, tampers with the copy only (forges the first BLOCK
+decision into an ALLOW) and shows verification break there. The original is opened read-only.
 Steps: create a mandate and a 5-entry ledger, verify (ok), try a plain UPDATE (the trigger
 blocks it), drop the trigger and rewrite entry 3 with raw SQL, verify again (broken at seq 3).
 """
 
+import argparse
 import json
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -116,7 +122,64 @@ def run_demo(workdir: Path, verbose: bool = True) -> tuple[dict, dict]:
     return before, after
 
 
-def main() -> int:
+def run_on_copy(source_db: Path, key_dir: Path) -> bool:
+    """Tamper with a COPY of a real ledger; return True if the break is detected at the forged entry."""
+    with tempfile.TemporaryDirectory(prefix="gawah-tamper-copy-") as tmp:
+        work = Path(tmp)
+        copy = work / "copy.db"
+        src = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True)
+        dst = sqlite3.connect(copy)
+        try:
+            src.backup(dst)  # consistent even while an engine writes
+        finally:
+            src.close()
+            dst.close()
+        shutil.copytree(key_dir, work / "keys")
+        svc = build_services(f"sqlite:///{copy}", str(work / "keys"), str(work / "keys"))
+        entries = svc.ledger.list()
+
+        _bar(f"1. A copy of the real ledger ({len(entries)} entries)")
+        print(f"  source database: {source_db.name} (opened read-only); tampering happens on the copy")
+        _show_entries(entries[:12])
+        if len(entries) > 12:
+            print(f"  ... {len(entries) - 12} more")
+        target = next((e for e in entries if e.type == LedgerEntryType.DECISION_MADE
+                       and e.data.get("verdict") == "BLOCK"), entries[len(entries) // 2])
+
+        _bar("2. Verify the copy before touching it")
+        before = svc.ledger.verify()
+        _show_verify(before)
+
+        _bar(f"3. Attacker rewrites entry {target.seq} ({target.type.value}) in the copy")
+        forged = {**target.data, "verdict": "ALLOW", "reasons": []}
+        print(f"  original verdict: {target.data.get('verdict')}, reasons {target.data.get('reasons')}")
+        print("  forged verdict  : ALLOW, reasons []")
+        conn = sqlite3.connect(copy, isolation_level=None)
+        try:
+            conn.execute("DROP TRIGGER ledger_no_update")  # the attacker has database access
+            conn.execute("UPDATE ledger SET data = ? WHERE seq = ?", (json.dumps(forged), target.seq))
+        finally:
+            conn.close()
+
+        _bar("4. Verify the tampered copy")
+        after = svc.ledger.verify()
+        _show_verify(after)
+        detected = before["ok"] and not after["ok"] and after["first_broken_seq"] == target.seq
+        print(_c("1;32" if detected else "1;31",
+                 f"\nTampering detected at seq {target.seq}; the original database was not touched."
+                 if detected else "\nDEMO FAILED"))
+        return bool(detected)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--copy-of", type=Path, help="tamper with a copy of this ledger database")
+    ap.add_argument("--keys", type=Path, help="the signing key directory of that database")
+    args = ap.parse_args(argv or [])
+    if args.copy_of:
+        if not args.keys:
+            ap.error("--copy-of needs --keys")
+        return 0 if run_on_copy(args.copy_of, args.keys) else 1
     with tempfile.TemporaryDirectory(prefix="gawah-tamper-") as tmp:
         before, after = run_demo(Path(tmp))
     detected = before["ok"] and not after["ok"] and after["first_broken_seq"] == TAMPER_SEQ
@@ -125,4 +188,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -2,7 +2,7 @@
 
 Three web services from one Blueprint (`render.yaml`): **gawah-engine** (System 2), **gawah-counsel**
 (System 3 API) and **gawah-web** (Next.js). System 1's shopper is an optional fourth, commented out
-in `render.yaml` until Suvir's code is merged and runs.
+in `render.yaml` on purpose (see "gawah-shopper" below).
 
 ```
 browser ──> gawah-web ──(server adds X-Gawah-Key = SYSTEM3_KEY)──> gawah-counsel ──> gawah-engine ──> PayPal sandbox
@@ -100,10 +100,31 @@ Counsel runs `alembic upgrade head` on every start (`scripts/start_counsel.sh`).
 | `SYSTEM3_API_URL` | dashboard | gawah-counsel URL (step 6) |
 | `SYSTEM3_KEY` | dashboard | step 1. Read only by the Next.js server's proxy route. **Never a `NEXT_PUBLIC_` variable.** |
 
-### gawah-shopper (optional, later)
+### gawah-shopper (not deployed; the block in `render.yaml` stays commented out)
 
-Uncomment the block in `render.yaml` once System 1 runs. It needs `ENGINE_URL`, `SYSTEM1_KEY`
-(same as the engine's), `GROQ_API_KEY`, `CHANNEL3_API_KEY`, and no PayPal or payment key.
+System 1's shopper (`system1/`) **can** run standalone, and `render.yaml` carries the verified
+commands. It is left off on purpose, because on Render it could not take part in the demo:
+
+- **It imports the engine.** `system1/shopper/merchant/demo_merchant.py` uses
+  `gawah_engine.signing.ES256Signer`, and `system1/pyproject.toml` depends on the workspace
+  packages `gawah` (the root, which contains `gawah_engine`) and `gawah-contract`. The build
+  resolves them with `uv sync --frozen --package gawah-shopper`: uv installs the shopper and its
+  workspace dependencies from the checkout, so the whole engine package (and its dependencies)
+  ships with the shopper. Checked from a clean virtualenv: `/health` and `/shopping/demo/products`
+  answer.
+- **The cart-signing key and the engine's merchant registry cannot stay in step.** The shopper
+  creates its ES256 key on first use under `MERCHANT_SIGNING_KEY_PATH` (default `keys/system1-merchant`,
+  on Render's ephemeral disk, so a new key after every restart). The engine registers one key per
+  merchant and refuses to replace it (`409 MERCHANT_KEY_CONFLICT`), and the engine's hosted bootstrap
+  registers `demo-shoe-store` only, not the shopper's `demo-sports`. After a restart of either side,
+  every cart is blocked as `MERCHANT_NOT_REGISTERED` or `CART_SIGNATURE_INVALID`.
+- **The shopper does not call the engine.** `shopper/config.py` has no engine URL or `SYSTEM1_KEY`;
+  nothing in `system1/` posts a proposal. `integration/e2e.py` does that step today.
+- **No authentication on `/shopping/*`**: a public shopper lets anyone spend the Groq quota.
+
+To enable it later: Suvir adds an engine client (issue #7); the shopper's key is supplied from
+the environment (or its public key is registered after each deploy); then uncomment the block.
+Until then run the shopper locally: `make e2e` proves the chain without any hosted shopper.
 
 ## 3. Dashboard checklist (what you do by hand)
 
@@ -136,6 +157,40 @@ Uncomment the block in `render.yaml` once System 1 runs. It needs `ENGINE_URL`, 
        timings, and prints which hop failed (engine, counsel, web, web->counsel). It makes one real
        sandbox payment ($65) when the engine is in demo mode with PayPal configured.
 9. [ ] Right before recording, run the script again so nothing is asleep.
+
+## 3b. Seeding the hosted dashboard from your laptop
+
+`integration/e2e.py` can drive the HOSTED engine and Counsel while the shopper and the merchant
+signing key stay on your machine. It refuses a non-local target unless `E2E_CONFIRM_REMOTE=1`.
+
+Prerequisites: the engine is `Live` (the script waits up to two minutes for a sleeping instance),
+it is in demo mode with the PayPal sandbox card configured, and `SYSTEM1_KEY` / `SYSTEM3_KEY` are the
+values the hosted services were given. Start the shopper locally (its Groq key is local):
+`uv run uvicorn shopper.main:app --port 8001` (or let `make e2e` start one).
+
+```sh
+E2E_CONFIRM_REMOTE=1 \
+ENGINE_URL=https://<engine>.onrender.com \
+COUNSEL_URL=https://<counsel>.onrender.com \
+SHOPPER_URL=http://localhost:8001 \
+SYSTEM1_KEY=<value> SYSTEM3_KEY=<value> \
+GROQ_API_KEY=<local shopper key> \
+uv run python -m integration.e2e --seed-counsel
+```
+
+What it does, in order: registers this laptop's demo merchant key (`keys/system1-merchant`) with the
+hosted engine, the real happy path, the attack set, then a second honest purchase (Counsel's DEFEND case) and the
+wrong-size purchase (ALLOWED, PAID, with a Guardian variant advisory: Counsel's CONCEDE case), so
+the last two PAID payments are the two Counsel's demo scenarios use. `--seed-counsel` then POSTs
+Counsel's demo-scenarios endpoint and prints what Counsel recommended for both cases. Add
+`--no-payments` to skip the attack cases that are correctly ALLOWED.
+
+Notes: the hosted engine remembers the first merchant key it is given (write-once), so a second
+laptop or a lost `keys/` directory stops with the remedy
+(`scripts/register_merchant_key.py --rotate`). The run creates real PayPal SANDBOX payments (about
+$60 and $55) on the hosted ledger. Ids in the output are masked. A Counsel recommendation that is not
+DEFEND / CONCEDE_REMEDY is printed as a `FLAG` with the evidence it was given; see
+`docs/INTEGRATION_ISSUES.md` #16.
 
 ## 4. Re-recording the video
 

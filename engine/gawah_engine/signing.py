@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import (
 )
 
 from .canonical import canonical_json
+from .key_permissions import secure_private_key_directory, secure_private_key_file
 
 ALG = "ES256"
 DEFAULT_KEY_DIR = "./keys"
@@ -74,6 +75,9 @@ class ES256Signer:
         self._lock = threading.Lock()
         self._cache: dict[str, ec.EllipticCurvePrivateKey] = {}
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        secure_private_key_directory(self.dir)
+        for existing_key in self.dir.glob("*.pem"):
+            secure_private_key_file(existing_key)
         with self._lock:
             if not self._active_pointer().exists():
                 try:
@@ -103,7 +107,14 @@ class ES256Signer:
             serialization.NoEncryption(),
         )
         # O_EXCL: never overwrite an existing key; mode 0600 from the start.
-        fd = os.open(self._key_path(key_id), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        path = self._key_path(key_id)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            secure_private_key_file(path)
+        except (OSError, RuntimeError):
+            os.close(fd)
+            path.unlink(missing_ok=True)
+            raise
         with os.fdopen(fd, "wb") as f:
             f.write(pem)
         tmp = self._active_pointer().with_suffix(".tmp")

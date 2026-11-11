@@ -35,6 +35,137 @@ Groq/PayPal sandbox quota. Suggested: a shared demo password (middleware) before
 localhost, so the hosted Resolution Center is read-only. `ENABLE_SANDBOX_RESOLUTION=false` is set
 in `render.yaml` to match. Not a bug; recorded so nobody expects refunds from the hosted UI.
 
-### 4. Untracked `web/AGENTS.md`
-`npm ci`/the Next build leaves an untracked `web/AGENTS.md` in the working tree. System 2 did not
-commit it. Navya: commit it or add it to `.gitignore`.
+### 4. `web/AGENTS.md` (web, Navya): resolved
+It is tracked upstream now (an untracked local copy blocked `git pull` until removed; it was identical).
+
+## From the end-to-end proof (`make e2e`, 2026-11-10)
+
+`integration/e2e.py` runs shopper -> signed proposal -> engine Guardian -> payment -> ledger. It
+did not edit `system1/`; everything below is what System 1 would have to change, with workarounds
+already in `integration/`.
+
+### 5. FIXED (2026-11-11): every shopper proposal was blocked as `PRICE_MISMATCH` (system1, Suvir)
+System 1 now sends the cart sku as `product.id`. `integration/e2e.py` no longer rewrites it and a test
+asserts the unmodified proposal is ALLOWED. Original report, kept for the record:
+
+The Guardian finds the product in the signed cart by `proposal.product.id == cart line sku`
+(`engine/gawah_engine/guardian.py:206`; `contract/fixtures/proposal_shoes.json` has both equal to
+`SHOE-BLK-RUN`). The shopper sets `product.id` to its internal product id (`shoe-001`) while the cart
+line sku is `NIKE-SWIFTRUN-12-BLK`, so even the honest happy path is blocked. Exact change, in
+`system1/shopper/merchant/demo_merchant.py`, `ProposalPreparationService.prepare`:
+
+```diff
+-            product=ContractProduct(id=product.product_id, title=product.title, url=product.url),
++            product=ContractProduct(id=product.sku, title=product.title, url=product.url),
+```
+(and update any test in `system1/tests` that asserts the old id). Workaround in `integration/e2e.py`:
+it overwrites `product.id` with the cart sku before posting, and a dry run of the unmodified proposal
+(`POST /v1/guardian/check`) prints `KNOWN ISSUE #5` for as long as the bug exists.
+
+### 6. No endpoint exposes the merchant public key (system1, Suvir)
+The engine must have the store's public key before it can verify a cart, and the shopper offers no
+way to read it. Workaround: `integration/e2e.py` builds a `DemoMerchantAdapter` on the same
+`MERCHANT_SIGNING_KEY_PATH` and registers `adapter.merchant_key("demo-sports")` (public key only)
+with `POST /v1/merchants`. Suggested change in `system1/shopper/main.py`:
+
+```python
+@app.get("/shopping/demo/merchant-key", response_model=MerchantKey)
+def demo_merchant_key(service: Annotated[ProposalPreparationService, Depends(get_proposal_preparation_service)]):
+    """Public key only: register it with the engine (POST /v1/merchants)."""
+    return service.merchant.merchant_key("demo-sports")
+```
+`merchant_key()` reaches into `self._signer._load` (private); a public `ES256Signer.public_key_pem(key_id)`
+would be cleaner (that class is in `engine/`; System 2 can add it).
+
+### 7. The shopper never talks to the engine (system1, Suvir)
+`shopper/config.py` has no engine URL or `SYSTEM1_KEY`, and nothing in `system1/` posts a proposal.
+`/shopping/demo/checkout` ends at "proposal prepared"; `integration/e2e.py` does the `POST /v1/proposals`.
+Needed for a real demo: `ENGINE_URL` and `SYSTEM1_KEY` settings and one call with header
+`X-Gawah-Key`. The shopper's key may only call `POST /v1/proposals`, `GET /v1/mandates*` and the
+merchants routes (`engine/gawah_engine/auth.py` SCOPES); it must never get a payment or refund tool.
+
+### 8. The attack runner never produces a proposal (system1, Suvir)
+`/shopping/test/attacks/run` (`attack_simulation.py`) filters fixture products and reports
+`observed_outcome` (all four say `ATTACK_RESISTED`), but `purchase_proposal_id` is always `None`, so
+nothing reaches the Guardian. `integration/e2e.py` therefore builds, for each fixture, the proposal a
+tricked agent would send (a cart signed by the real demo-merchant key, the fixture's injected
+description as `rationale`) and labels it SIMULATED. Note `authority_spoof` is a compliant cart: the
+Guardian rightly ALLOWS it because the injected text only ever lives in a description or rationale,
+which the Guardian never reads. The run also sends the same text on a $120 cart and checks it is blocked.
+
+### 9. FIXED (2026-11-11): provider catalog and merchant catalog disagreed (system1, Suvir)
+`PurchasableDemoCatalogProvider` now limits the demo checkout to what the merchant stocks. Original report:
+
+`data/demo_catalog.json` has 13 products; the merchant catalog (`demo_merchant_catalog.json`) can only
+sell `shoe-001`, `shoe-002` (stock 0), `grocery-001`, `grocery-004`. If the real model selects
+`shoe-003` ($74, a valid pick for "black Nike running shoes size 12 under $80") the checkout answers
+"The demo merchant could not verify the selected product; no cart was created." The e2e stub picks the
+cheapest product, which happens to be `shoe-001`. Add the other shoes (and `demo-tech`) to the merchant
+catalog, or restrict the demo provider to what the merchant sells.
+
+### 10. FIXED (2026-11-11): `Settings` demanded `GROQ_API_KEY` even when no model is used (system1, Suvir)
+`groq_api_key` now defaults to empty. The path and authentication points below still apply. Original report:
+
+`Settings()` needs `groq_api_key`, so signing a cart or starting a standalone shopper without a key
+raises. `integration/` passes a placeholder. Make it optional (`str | None = None`) and fail only where
+Groq is called. Also: `MERCHANT_SIGNING_KEY_PATH` defaults to a path relative to the working
+directory, and the `/shopping/*` routes have no authentication (see `docs/DEPLOY.md`, "gawah-shopper").
+
+### 11. Root `pyproject.toml` (System 2, FYI for everyone)
+`shopper` was not installed by a plain `uv sync` (only `--all-packages`), so `uv run pytest system1/tests`
+failed on a fresh clone. The root dev dependency group now includes `gawah-shopper` (workspace member),
+`pythonpath` adds `.`, and `testpaths` adds `integration/tests`. Side effect: the engine's Render build
+(`uv sync --frozen`) also installs the shopper and `groq` (dev group), harmlessly.
+
+### 12. FIXED (2026-11-11): `ruff check .` failed on three System 3 files (system3, Navya)
+Import order fixed upstream; `ruff check .` is clean repo-wide. Original report:
+
+`I001` (import order, auto-fixable with `ruff check --fix`) in `system3/counsel/demo.py`,
+`system3/run_demo_scenarios.py` and `system3/tests/test_demo.py`. CLAUDE.md requires `ruff check .`
+to pass; System 2 did not touch them.
+
+### 13. FIXED (2026-11-11): the keyword fallback let groceries through (engine)
+The fallback now fails closed for a known mandate category (Suvir), and recognises SwiftRun-style
+footwear names (`engine/tests/test_keyword_fallback.py`); "Harvest Gold Atta Bread" is blocked. The
+e2e uses a SIMULATED semantic model so it does not depend on either. Original report:
+
+Without a Groq key the Guardian's fallback labels `Harvest Gold Atta Bread` and `Green Valley Apples`
+under a footwear mandate as `unclear`, which does not block. With Groq all four demo grocery and
+electronics titles are `mismatch` (cached by `scripts/warm_semantic_cache.py`). The e2e therefore uses
+an electronics title for its wrong-category case, which the fallback does catch. Candidate fix: add
+bread, produce and similar words to the `groceries` group in `engine/gawah_engine/semantic.py`.
+
+### 14. `run_demo_scenarios.py` hardcodes Counsel's address (system3, Navya)
+`system3/run_demo_scenarios.py` posts to `http://127.0.0.1:8002`, so Counsel cannot run on another
+port for a rehearsal, and a leftover dev Counsel on 8002 would receive the call. Suggested: read the base
+URL from `Settings` or an env var (for example `COUNSEL_URL`, default `http://127.0.0.1:8002`).
+`scripts/rehearse.sh` pins Counsel to 8002 for this reason.
+
+### 15. Merchant key persistence needs no System 1 change (resolved, FYI)
+`MERCHANT_SIGNING_KEY_PATH` defaults to `keys/system1-merchant` (gitignored). `integration/e2e.py` and
+`scripts/rehearse.sh` set it to the absolute `<repo>/keys/system1-merchant`, so every shopper restart reuses
+the key. Run the shopper from the repo root or set the variable. If the engine's database remembers a
+different key, `e2e.py` stops and prints the remedy; `scripts/register_merchant_key.py --rotate` applies it.
+Still open for System 1: #6 (no endpoint exposes the public key) and #7 (the shopper never posts to the
+engine); both are worked around in `integration/`.
+
+### 16. Counsel's demo can never reach DEFEND or CONCEDE_REMEDY (system3, Navya)
+`make rehearse` now seeds the last two PAID payments as Counsel's demo reads them (`payments[-2:]`):
+second-to-last an honest size-12 purchase, last an ALLOWED size-11 purchase with a Guardian variant
+advisory in `DECISION_MADE.data.advisories` (`integration/e2e.py --phase variant`). Counsel still
+answers `REQUEST_MORE_EVIDENCE` for both. `e2e --phase counsel-check` prints what it was given:
+
+- The engine's evidence bundle is complete and verifies (mandate, signed cart, ledger, PayPal order
+  and capture, the advisory). It is not a missing engine field.
+- Counsel itself lists `ORDER_UNAVAILABLE`, `FULFILLMENT_UNAVAILABLE`, `DELIVERY_UNAVAILABLE` as
+  missing for every PAID footwear payment: `docs/CONTRACT.md` exposes no merchant order, fulfilment or
+  delivery record, so "defend with delivery evidence" cannot be satisfied from this stack.
+- `assess_case` (`system3/counsel/counsel_case.py`) supports DEFEND / CONCEDE_REMEDY only for reason
+  `INCORRECT_AMOUNT` from a real PayPal record with a verified amount comparison. The demo disputes are
+  `SIMULATED_FIXTURE` with reasons `ITEM_NOT_RECEIVED` and `MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED`.
+  The size mismatch is detected (`AUTHORIZED_SIZE_MISMATCH`, finding `ORDER_VARIANT_CONFLICT`) but only
+  adds a finding.
+
+Suggested for System 3: let a simulated fixture carry its own assessed outcome, or accept the
+engine's signed-cart delivery/variant evidence as sufficient for the fixture cases, and say
+"SIMULATED" on the result. The engine side needs no change.
