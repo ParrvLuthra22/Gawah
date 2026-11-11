@@ -41,6 +41,7 @@ blocks every merchant but demo-shoe-store), so the run only checks wire formats 
 
 import argparse
 import asyncio
+import contextlib
 import os
 import sys
 import uuid
@@ -49,6 +50,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from gawah_contract import Product as ContractProduct
@@ -88,6 +90,7 @@ class Report:
     rows: list[Row] = field(default_factory=list)
     checks: list[tuple[str, bool, str]] = field(default_factory=list)  # name, ok, detail
     real_payment: bool = False
+    flags: list[str] = field(default_factory=list)  # findings worth a human's attention; exit code unaffected
     ledger: str = ""
 
     @property
@@ -147,13 +150,19 @@ class Runner:
         merchant: DemoMerchantAdapter,
         expiry_s: int = 3,
         phase: str = "all",
+        counsel: httpx.AsyncClient | None = None,
+        seed_counsel: bool = False,
+        no_payments: bool = False,
+        health_wait_s: float = 0,
         out: Callable[[str], None] = print,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.engine, self.shopper = engine, shopper
         self._keys = {1: s1_key, 3: s3_key}
         self.merchant, self.expiry_s, self.out, self._sleep = merchant, expiry_s, out, sleep
-        self.phase = phase  # all | happy | attacks
+        self.phase = phase  # all | happy | attacks | variant | seed | counsel-check
+        self.counsel, self.seed_counsel, self.no_payments = counsel, seed_counsel, no_payments
+        self.health_wait_s = health_wait_s
         self.report = Report()
         self.run_id = uuid.uuid4().hex[:8]
 
@@ -270,19 +279,23 @@ class Runner:
         self.out(f"engine: {mode}; semantic check: {health.get('semantic')} "
                  f"({health.get('model') or 'keyword fallback'}); phase: {self.phase}\n")
 
-        self.out("1. register the demo merchant key")
-        await self.register_merchant()
-        self.out("2. create the mandate")
-        mandate_a = await self.new_mandate("happy")
-        self.out(f"  {mandate_a}: ${sc.BUDGET_MINOR // 100} {sc.CURRENCY}, {sc.CATEGORY}, "
-                 f"{sc.MERCHANT_ID} (allowed), expires in 10 minutes")
+        steps = {"all": ("happy", "attacks", "seed"), "happy": ("happy",), "attacks": ("attacks",),
+                 "variant": ("variant",), "seed": ("seed",), "counsel-check": ()}[self.phase]
+        mandate_a = happy_proposal = None
+        if steps:
+            self.out("1. register the demo merchant key")
+            await self.register_merchant()
+        if "happy" in steps or "attacks" in steps:
+            self.out("2. create the mandate")
+            mandate_a = await self.new_mandate("happy")
+            self.out(f"  {mandate_a}: ${sc.BUDGET_MINOR // 100} {sc.CURRENCY}, {sc.CATEGORY}, "
+                     f"{sc.MERCHANT_ID} (allowed), expires in 10 minutes")
 
-        happy_proposal = None
-        if self.phase in ("all", "happy"):
+        if "happy" in steps:
             self.out("3. happy path: shopper -> proposal -> Guardian -> payment")
             happy_proposal = await self.happy_path(mandate_a)
 
-        if self.phase in ("all", "attacks"):
+        if "attacks" in steps:
             self.out("4. attacks and Guardian cases (a fresh mandate for each)")
             # created now, checked last: the only way to test expiry is to let it expire
             expiring = await self.new_mandate("expiring", ttl_s=self.expiry_s)
@@ -294,18 +307,40 @@ class Runner:
             self.record("guardian: expired mandate", "proposal prepared", body, "BLOCK",
                         {"MANDATE_EXPIRED"})
 
-        self.out("5. ledger")
+        if "seed" in steps or "variant" in steps:
+            self.out("5. the two payments Counsel's demo scenarios use (the LAST two PAID payments)")
+            if "seed" in steps:
+                await self.honest_purchase()
+            await self.variant_purchase()
+
+        if self.counsel is not None and self.phase in ("all", "seed", "variant") and self.seed_counsel:
+            self.out("6. seed Counsel's demo scenarios")
+            await self.seed_counsel_scenarios()
+        if self.counsel is not None and (self.seed_counsel or self.phase == "counsel-check"):
+            self.out("7. what Counsel recommends for the last two PAID payments")
+            await self.check_counsel()
+
+        self.out("8. ledger")
         await self.verify_ledger()
         return rep
 
     async def _health(self) -> dict[str, Any]:
-        try:
-            r = await self.engine.get("/health")
-        except httpx.HTTPError as exc:
-            raise E2EError(f"engine unreachable: {type(exc).__name__}") from exc
-        if r.status_code != 200:
-            raise E2EError(f"engine /health -> {r.status_code}")
-        return r.json()
+        """/health, patiently when asked to: a sleeping hosted instance takes a minute to wake."""
+        waited = 0.0
+        while True:
+            try:
+                r = await self.engine.get("/health")
+                if r.status_code == 200:
+                    return r.json()
+                problem = f"engine /health -> {r.status_code}"
+                retry = r.status_code in (502, 503, 504)
+            except httpx.HTTPError as exc:
+                problem, retry = f"engine unreachable: {type(exc).__name__}", True
+            if not retry or waited >= self.health_wait_s:
+                raise E2EError(problem)
+            self.out(f"  ({problem}; waiting for the engine to wake, {int(waited)}s)")
+            await self._sleep(10)
+            waited += 10
 
     async def register_merchant(self) -> None:
         """Idempotent: the same key again is fine; a different key stops with the remedy."""
@@ -409,6 +444,10 @@ class Runner:
             ("authority_spoof", sc.attack_product("authority_spoof"), spoof_text, "ALLOW", set()),
         ]
         for sid, product, rationale, expect, need in cases:
+            if expect == "ALLOW" and self.no_payments:
+                self.out(f"  (skipped attack: {sid}: correctly ALLOWED, so it would be an extra payment; "
+                         "`make e2e` covers it)")
+                continue
             outcome = await self.shopper_attack_outcome(sid)
             mandate = await self.new_mandate(sid)
             body = await self.submit(self.crafted_proposal(mandate, product, rationale))
@@ -452,6 +491,125 @@ class Runner:
         body = await self.submit(replay)
         self.record("guardian: replayed cart", "replayed", body, "BLOCK", {"DUPLICATE"})
 
+    async def honest_purchase(self) -> str | None:
+        """An honest, correct purchase through the shopper's own proposal (Counsel's DEFEND case)."""
+        mandate = await self.new_mandate("counsel_honest")
+        body = await self.submit(await self.shopper_proposal(mandate))
+        self.record("counsel case: honest purchase", "proposal prepared", body, "ALLOW", is_attack=False)
+        pay = body.get("payment") or {}
+        if not self.report.mock:
+            self.check("honest purchase is PAID", pay.get("status") == "PAID",
+                       f"{pay.get('status')} {mask(pay.get('id', '-'))}")
+        return pay.get("id")
+
+    async def variant_purchase(self) -> str | None:
+        """An ALLOWED purchase of the wrong size: the mandate says size 12, the signed cart size 11.
+
+        `variant_advisories` in the Guardian does not block a size difference, it records an
+        advisory in the DECISION_MADE ledger entry; the payment goes ahead (PAID). SIMULATED: the
+        shopper cannot sell size 11 (no stock), so this cart is signed with the real merchant key."""
+        mandate = await self.new_mandate("counsel_variant")
+        product = sc.wrong_variant_product()
+        body = await self.submit(self.crafted_proposal(
+            mandate, product, "Size 12 is sold out; the store offered size 11."))
+        self.record("counsel case: wrong size (11 vs 12)", "crafted", body, "ALLOW", is_attack=False)
+        pay = body.get("payment") or {}
+        if self.report.mock:
+            return pay.get("id")
+        self.check("wrong-size purchase is PAID", pay.get("status") == "PAID",
+                   f"{pay.get('status')} {mask(pay.get('id', '-'))}")
+        entries = await self.api(3, "GET", f"/v1/ledger?mandate_id={mandate}")
+        decision = next((e for e in entries if e["type"] == "DECISION_MADE"), {"data": {}})
+        advisories = decision["data"].get("advisories") or []
+        self.check("Guardian stored a variant advisory in DECISION_MADE", bool(advisories),
+                   advisories[0] if advisories else "no advisories in the ledger entry")
+        return pay.get("id")
+
+    # ---- Counsel ---------------------------------------------------------------------------
+    async def counsel_call(self, method: str, path: str) -> Any:
+        assert self.counsel is not None
+        try:
+            r = await self.counsel.request(method, path, headers={"X-Gawah-Key": self._keys[3]})
+        except httpx.HTTPError as exc:
+            raise E2EError(f"Counsel unreachable on {method} {path}: {type(exc).__name__}") from exc
+        if r.status_code >= 400:
+            raise E2EError(f"Counsel {method} {path} -> {r.status_code}: {_clip(r.text)}")
+        return r.json()
+
+    async def seed_counsel_scenarios(self) -> None:
+        """What system3/run_demo_scenarios.py does: POST the demo-scenarios endpoint. Its AI step
+        calls Groq right after everything else did, so one rate-limit failure is retried once."""
+        for attempt in (1, 2):
+            rows = await self.counsel_call("POST", "/api/dashboard/demo-scenarios")
+            for row in rows:
+                self.out(f"  {row['scenario']}: {row['status']} {row.get('recommendation') or '-'}")
+            if all(row["status"] == "COMPLETED" for row in rows):
+                return
+            if attempt == 1:
+                self.out("  a scenario failed (usually the model's rate limit); waiting 30s, retrying once")
+                await self._sleep(30)
+        self.report.flags.append("Counsel demo scenarios did not complete after a retry")
+
+    async def check_counsel(self) -> None:
+        """DEFEND case = second-to-last PAID payment, CONCEDE case = the last (as Counsel's demo uses
+        them). Assert the recommendations; when they are not a defend/concede, print what Counsel was
+        given and say what is missing. Never fails the run: the exit code is about the Guardian."""
+        paid = [p for p in await self.api(3, "GET", "/v1/payments") if p["status"] == "PAID"]
+        if len(paid) < 2:
+            raise E2EError("fewer than two PAID payments on the engine, so Counsel has nothing to seed")
+        for label, pay, want in (("DEFEND", paid[-2], "DEFEND"), ("CONCEDE", paid[-1], "CONCEDE_REMEDY")):
+            analysis = await self.counsel_call("GET", f"/api/counsel/{pay['id']}")
+            outcome = analysis.get("outcome") or {}
+            got = outcome.get("recommendation")
+            ok = got == want
+            self.out(f"  Counsel {label} case ({mask(pay['id'])}): recommends {got} "
+                     f"({'as expected' if ok else 'EXPECTED ' + want})")
+            if not ok:
+                await self.explain_counsel(label, pay, analysis, want)
+
+    async def explain_counsel(self, label: str, pay: dict[str, Any], analysis: dict[str, Any],
+                              want: str) -> None:
+        bundle = await self.api(3, "GET", f"/v1/evidence/{pay['id']}")
+        entries = bundle["ledger_entries"]
+        decision = next((e for e in entries if e["type"] == "DECISION_MADE"), {"data": {}})
+        line = bundle["signed_cart"]["line_items"][0]
+        pack = await self.counsel_call("GET", f"/api/evidence/{pay['id']}")
+        issues = await self.counsel_call("GET", f"/api/evidence/{pay['id']}/issues")
+        dispute = next((i for i in pack.get("evidence", []) if i.get("type") == "dispute"), {})
+        reason, source = analysis.get("dispute_reason"), dispute.get("source_type")
+        findings = [f["id"] for f in (analysis.get("outcome") or {}).get("reasoning", [])]
+        v = bundle["verification"]
+        self.out(f"  -- {label}: Counsel recommended {analysis['outcome']['recommendation']}, "
+                 f"expected {want}. Fields it was given for payment {mask(pay['id'])}:")
+        self.out(f"     mandate.item_description : {bundle['mandate']['item_description']}")
+        self.out(f"     signed cart line         : {line['title']} / {line['variant']} / "
+                 f"{line['unit_price_minor']}c x {line['quantity']}")
+        self.out(f"     Guardian advisories      : {decision['data'].get('advisories') or 'none'}")
+        self.out(f"     payment                  : {pay['status']} order {mask(pay.get('paypal_order_id'))} "
+                 f"capture {mask(pay.get('paypal_capture_id'))}")
+        self.out("     engine verification      : "
+                 + ", ".join(f"{c['name']}={'ok' if c['ok'] else 'BAD'}" for c in v["checks"]))
+        self.out(f"     Counsel dispute          : reason {reason}, source {source}")
+        self.out(f"     Counsel contradictions   : {[i['code'] for i in issues['contradictions']] or 'none'}; "
+                 f"missing {[i['code'] for i in issues['missing_evidence']] or 'none'}")
+        self.out(f"     Counsel findings cited   : {findings}")
+        why = []
+        if reason != "INCORRECT_AMOUNT":
+            why.append(f"the dispute reason is {reason}, not INCORRECT_AMOUNT")
+        if source != "REAL_RECORD":
+            why.append(f"the dispute record is {source}, not a real PayPal dispute")
+        missing = [i["code"] for i in issues["missing_evidence"]]
+        self.report.flags.append(
+            f"Counsel {label}: {got_or(analysis)} instead of {want}. Everything the engine holds for this "
+            f"payment is present and verified (signed cart, mandate, ledger, PayPal order and capture"
+            f"{', Guardian variant advisory' if label == 'CONCEDE' else ''}). What Counsel lists as "
+            f"missing is {missing or 'nothing'}: the shared contract (docs/CONTRACT.md) exposes no "
+            "merchant order, fulfilment or delivery record, so no delivery evidence can reach Counsel "
+            "from this stack. Separately, Counsel's rule (system3/counsel/counsel_case.py, assess_case) "
+            "only supports DEFEND or CONCEDE_REMEDY for reason INCORRECT_AMOUNT on a real PayPal "
+            "dispute with a verified amount comparison; here " + "; ".join(why or ["its inputs are met"])
+            + ". A size mismatch only adds the finding ORDER_VARIANT_CONFLICT. Needs a System 3 change.")
+
     async def verify_ledger(self) -> None:
         res = await self.api(3, "GET", "/v1/ledger/verify")
         if self.report.mock:
@@ -461,6 +619,10 @@ class Runner:
         self.report.ledger = f"ok={res['ok']}, {res['checked']} entries checked"
         self.check("ledger chain verifies (hashes, links, signatures)", bool(res["ok"]),
                    f"{res['checked']} entries" + ("" if res["ok"] else f": {res.get('reason')}"))
+
+
+def got_or(analysis: dict[str, Any]) -> str:
+    return str((analysis.get("outcome") or {}).get("recommendation"))
 
 
 def print_table(report: Report, out: Callable[[str], None] = print) -> None:
@@ -478,6 +640,8 @@ def print_table(report: Report, out: Callable[[str], None] = print) -> None:
         out("MOCK engine: results are fixtures, not Guardian decisions. Use the default `make e2e`.")
     elif report.env == "test":
         out("Payments above are SIMULATED (the engine's fake PayPal); attacker proposals are SIMULATED.")
+    for flag in report.flags:
+        out(f"FLAG: {flag}")
     for row in report.allowed_attacks:
         out(f"!! ATTACK ALLOWED: {row.scenario}")
     out(f"ledger: {report.ledger or 'not checked'}")
@@ -496,23 +660,59 @@ def _keys() -> tuple[str, str]:
     return s1, s3
 
 
-async def amain(argv: list[str] | None = None) -> int:
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def remote_guard(engine_url: str, counsel_url: str | None, env: dict[str, str]) -> str | None:
+    """None when the targets are local or the operator confirmed a hosted run on purpose.
+
+    A hosted run creates real sandbox payments on a shared engine, so it needs E2E_CONFIRM_REMOTE=1
+    (and, because the shopper and merchant key stay local, the hosted engine must have been given
+    this laptop's merchant public key: see docs/DEPLOY.md)."""
+    remote = [u for u in (engine_url, counsel_url) if u and (urlparse(u).hostname or "") not in LOCAL_HOSTS]
+    if not remote or env.get("E2E_CONFIRM_REMOTE") == "1":
+        return None
+    hosts = ", ".join(sorted({urlparse(u).hostname or u for u in remote}))
+    return (f"refusing to run against a non-local target ({hosts}). This creates sandbox payments, "
+            "mandates and ledger entries on that deployment. If that is the intent, set E2E_CONFIRM_REMOTE=1.")
+
+
+async def amain(argv: list[str] | None = None, env: dict[str, str] | None = None) -> int:
+    env = dict(os.environ) if env is None else env
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--engine-url", default=os.environ.get("ENGINE_URL", "http://localhost:8000"))
-    ap.add_argument("--shopper-url", default=os.environ.get("SHOPPER_URL", "http://localhost:8001"))
+    ap.add_argument("--engine-url", default=env.get("ENGINE_URL", "http://localhost:8000"))
+    ap.add_argument("--shopper-url", default=env.get("SHOPPER_URL", "http://localhost:8001"))
+    ap.add_argument("--counsel-url", default=env.get("COUNSEL_URL") or None,
+                    help="Counsel API (System 3). With it, the run checks Counsel's recommendations.")
     ap.add_argument("--expiry-seconds", type=int, default=3)
-    ap.add_argument("--phase", choices=("all", "happy", "attacks"), default="all")
+    ap.add_argument("--phase", choices=("all", "happy", "attacks", "variant", "seed", "counsel-check"),
+                    default="all")
+    ap.add_argument("--seed-counsel", action="store_true",
+                    help="also POST Counsel's demo-scenarios endpoint (what run_demo_scenarios.py does)")
+    ap.add_argument("--no-payments", action="store_true",
+                    help="skip the attack cases that are correctly ALLOWED (they would create payments)")
     args = ap.parse_args(argv)
+    refusal = remote_guard(args.engine_url, args.counsel_url, env)
+    if refusal:
+        print(f"\ne2e could not run: {refusal}", file=sys.stderr)
+        return 2
+    remote = args.engine_url != "http://localhost:8000" and (
+        urlparse(args.engine_url).hostname not in LOCAL_HOSTS)
     # The shopper's merchant key persists here (gitignored) unless the environment says otherwise.
     os.environ.setdefault("MERCHANT_SIGNING_KEY_PATH", str(DEFAULT_MERCHANT_KEYS))
     try:
         s1, s3 = _keys()
         # Settings needs a Groq key to construct; this adapter only signs and never calls Groq.
         merchant = DemoMerchantAdapter(Settings(groq_api_key=os.environ.get("GROQ_API_KEY") or "unused"))
+        counsel_cm = (httpx.AsyncClient(base_url=args.counsel_url.rstrip("/"), timeout=180)
+                      if args.counsel_url else contextlib.nullcontext())
         async with httpx.AsyncClient(base_url=args.engine_url.rstrip("/"), timeout=60) as engine, \
-                httpx.AsyncClient(base_url=args.shopper_url.rstrip("/"), timeout=90) as shopper:
+                httpx.AsyncClient(base_url=args.shopper_url.rstrip("/"), timeout=90) as shopper, \
+                counsel_cm as counsel:
             runner = Runner(engine, shopper, s1_key=s1, s3_key=s3, merchant=merchant,
-                            expiry_s=args.expiry_seconds, phase=args.phase)
+                            expiry_s=args.expiry_seconds, phase=args.phase, counsel=counsel,
+                            seed_counsel=args.seed_counsel, no_payments=args.no_payments,
+                            health_wait_s=120 if remote else 0)
             report = await runner.run()
     except E2EError as exc:
         print(f"\ne2e could not run: {exc}", file=sys.stderr)

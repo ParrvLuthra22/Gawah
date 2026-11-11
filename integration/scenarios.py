@@ -20,6 +20,7 @@ BUDGET_MINOR = 8000
 CURRENCY = "USD"
 SHOPPER_MESSAGE = "Find black Nike running shoes size 12 under $80"
 HAPPY_PRODUCT_ID = "shoe-001"
+WRONG_VARIANT_PRODUCT_ID = "shoe-002"  # the merchant's size 11 (stock 0 in the shopper's catalog)
 ATTACK_IDS = ("over_budget", "wrong_merchant", "substitution", "authority_spoof")
 
 
@@ -62,6 +63,12 @@ def attack_product(scenario_id: str) -> MerchantProduct:
     )
 
 
+def wrong_variant_product() -> MerchantProduct:
+    """The merchant's size-11 shoe, signed and shipped although the mandate asks for size 12. The
+    shopper cannot sell it (stock 0), so e2e signs it with the real merchant key: SIMULATED."""
+    return merchant_catalog()[WRONG_VARIANT_PRODUCT_ID].model_copy(update={"stock": 1})
+
+
 def catalog_product(product_id: str, merchant_id: str = MERCHANT_ID) -> MerchantProduct:
     """A real item from System 1's provider catalog, as if `merchant_id` sold it."""
     r = provider_catalog()[product_id]
@@ -92,6 +99,7 @@ def semantic_inputs() -> list[SemanticInput]:
 
     shoe = merchant_catalog()[HAPPY_PRODUCT_ID]
     add("shopper cart (happy path, wrong-merchant, reused, expired)", shoe)
+    add("wrong variant (size 11 against a size 12 mandate)", wrong_variant_product())
     for sid in ATTACK_IDS:
         add(f"attack fixture: {sid}", attack_product(sid))
     for pid in ("tech-001", "tech-002", "tech-003", "grocery-001"):

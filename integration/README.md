@@ -25,7 +25,7 @@ Files: `e2e.py` (the script and its async core), `scenarios.py` (data read from 
 fixtures, also used by `scripts/warm_semantic_cache.py`), `stubs.py`, `shopper_stub_app.py` and `engine_stub_app.py`
 (the stubbed models), `tests/` (in-process tests).
 
-`--phase happy|attacks|all` selects steps. The shopper's merchant key persists in
+`--phase all|happy|attacks|variant|seed|counsel-check` selects steps (`all` ends with the two payments Counsel's demo reads: an honest purchase, then an ALLOWED wrong-size purchase with a Guardian variant advisory; `--no-payments` skips the correctly ALLOWED attack cases; `--counsel-url` / `--seed-counsel` check what Counsel recommends and print a `FLAG` with the evidence it was given when that is not DEFEND / CONCEDE_REMEDY; `E2E_CONFIRM_REMOTE=1` is required for a hosted target, see docs/DEPLOY.md). The shopper's merchant key persists in
 `keys/system1-merchant`; re-running against an engine that already has it is a no-op, and a different
 key stops with the remedy (`scripts/register_merchant_key.py --rotate`). Ids from a real PayPal run are
 masked (first 4, last 3 characters).
