@@ -2,11 +2,15 @@
 # Full demo rehearsal, in video order. Starts the engine (8000), shopper (8001), Counsel (8002) and
 # web (3000) (ENGINE_PORT, SHOPPER_PORT and WEB_PORT can be
 # overridden; Counsel is pinned to 8002 because system3/run_demo_scenarios.py hardcodes it), then runs:
-#   1. the REAL happy path (PayPal sandbox card route: a real $59.99 sandbox payment)
-#   2. the attack set (all attacks and Guardian cases; the compliant authority_spoof cart is
-#      correctly ALLOWED and is the SECOND real sandbox payment, which Counsel's scenarios require)
-#   3. system3/run_demo_scenarios.py (Counsel's simulated dispute cases)
-#   4. the ledger tamper demo, on a COPY of the engine database
+#   1. the REAL happy path (PayPal sandbox card route: a real $59.99 sandbox payment). This honest,
+#      correct purchase is Counsel's DEFEND case (second-to-last PAID payment)
+#   2. the attack set, with --no-payments so nothing after the happy path creates a payment
+#   3. the wrong-size purchase: ALLOWED, PAID, with a Guardian variant advisory (size 11 against a
+#      size-12 mandate; the cart is SIMULATED, signed with the demo merchant key). It is the LAST
+#      PAID payment, Counsel's CONCEDE case. Counsel's demo reads payments[-2:], so order matters
+#   4. system3/run_demo_scenarios.py (Counsel's simulated dispute cases), then a check of what
+#      Counsel recommended for the two cases (flagged, not fatal, when it is not DEFEND / CONCEDE)
+#   5. the ledger tamper demo, on a COPY of the engine database
 # then prints the URLs to open. Everything is stopped on exit.
 #
 #   bash scripts/rehearse.sh            (or: make rehearse)
@@ -133,13 +137,16 @@ else
   run "warm cache" "$PY" scripts/warm_semantic_cache.py --database-url "sqlite:///$DB"
 fi
 
-step "1/4 real happy path (PayPal sandbox)"
+step "1/6 real happy path (PayPal sandbox)"
 run "real happy path" "$PY" -m integration.e2e --phase happy
 
-step "2/4 attack set"
-run "attack set" "$PY" -m integration.e2e --phase attacks
+step "2/6 attack set (no extra payments)"
+run "attack set" "$PY" -m integration.e2e --phase attacks --no-payments
 
-step "3/4 Counsel demo scenarios (system3/run_demo_scenarios.py)"
+step "3/6 wrong-size purchase (ALLOWED with a variant advisory; the last PAID payment)"
+run "wrong-size purchase" "$PY" -m integration.e2e --phase variant
+
+step "4/6 Counsel demo scenarios (system3/run_demo_scenarios.py)"
 counsel_scenarios() {
   ( cd "$ROOT/system3" && env "SYSTEM3_KEY=$SYSTEM3_KEY" "${COUNSEL_UV[@]}" python run_demo_scenarios.py )
 }
@@ -154,7 +161,12 @@ if counsel_scenarios; then took; else
   if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
 fi
 
-step "4/4 ledger tamper demo (on a COPY of the engine database)"
+step "5/6 what Counsel recommended for the two cases"
+# prints Counsel's recommendation per case, and when it is not DEFEND / CONCEDE_REMEDY, the fields
+# Counsel was given and the rule that stopped it. A flag here is a finding, not a failed rehearsal.
+run "counsel recommendations" "$PY" -m integration.e2e --phase counsel-check --counsel-url "http://127.0.0.1:$COUNSEL_PORT"
+
+step "6/6 ledger tamper demo (on a COPY of the engine database)"
 run "tamper demo" "$PY" scripts/tamper_demo.py --copy-of "$DB" --keys "$ENGINE_KEYS"
 echo "original ledger, checked through the engine after the tamper demo:"
 curl -fsS -H "X-Gawah-Key: $SYSTEM3_KEY" "$ENGINE_URL/v1/ledger/verify" | "$PY" -c "import json,sys; r=json.load(sys.stdin); print('  ok=%s, %s entries checked' % (r['ok'], r['checked']))"

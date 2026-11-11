@@ -148,3 +148,24 @@ the key. Run the shopper from the repo root or set the variable. If the engine's
 different key, `e2e.py` stops and prints the remedy; `scripts/register_merchant_key.py --rotate` applies it.
 Still open for System 1: #6 (no endpoint exposes the public key) and #7 (the shopper never posts to the
 engine); both are worked around in `integration/`.
+
+### 16. Counsel's demo can never reach DEFEND or CONCEDE_REMEDY (system3, Navya)
+`make rehearse` now seeds the last two PAID payments as Counsel's demo reads them (`payments[-2:]`):
+second-to-last an honest size-12 purchase, last an ALLOWED size-11 purchase with a Guardian variant
+advisory in `DECISION_MADE.data.advisories` (`integration/e2e.py --phase variant`). Counsel still
+answers `REQUEST_MORE_EVIDENCE` for both. `e2e --phase counsel-check` prints what it was given:
+
+- The engine's evidence bundle is complete and verifies (mandate, signed cart, ledger, PayPal order
+  and capture, the advisory). It is not a missing engine field.
+- Counsel itself lists `ORDER_UNAVAILABLE`, `FULFILLMENT_UNAVAILABLE`, `DELIVERY_UNAVAILABLE` as
+  missing for every PAID footwear payment: `docs/CONTRACT.md` exposes no merchant order, fulfilment or
+  delivery record, so "defend with delivery evidence" cannot be satisfied from this stack.
+- `assess_case` (`system3/counsel/counsel_case.py`) supports DEFEND / CONCEDE_REMEDY only for reason
+  `INCORRECT_AMOUNT` from a real PayPal record with a verified amount comparison. The demo disputes are
+  `SIMULATED_FIXTURE` with reasons `ITEM_NOT_RECEIVED` and `MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED`.
+  The size mismatch is detected (`AUTHORIZED_SIZE_MISMATCH`, finding `ORDER_VARIANT_CONFLICT`) but only
+  adds a finding.
+
+Suggested for System 3: let a simulated fixture carry its own assessed outcome, or accept the
+engine's signed-cart delivery/variant evidence as sufficient for the fixture cases, and say
+"SIMULATED" on the result. The engine side needs no change.

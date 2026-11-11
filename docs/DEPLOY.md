@@ -158,6 +158,40 @@ Until then run the shopper locally: `make e2e` proves the chain without any host
        sandbox payment ($65) when the engine is in demo mode with PayPal configured.
 9. [ ] Right before recording, run the script again so nothing is asleep.
 
+## 3b. Seeding the hosted dashboard from your laptop
+
+`integration/e2e.py` can drive the HOSTED engine and Counsel while the shopper and the merchant
+signing key stay on your machine. It refuses a non-local target unless `E2E_CONFIRM_REMOTE=1`.
+
+Prerequisites: the engine is `Live` (the script waits up to two minutes for a sleeping instance),
+it is in demo mode with the PayPal sandbox card configured, and `SYSTEM1_KEY` / `SYSTEM3_KEY` are the
+values the hosted services were given. Start the shopper locally (its Groq key is local):
+`uv run uvicorn shopper.main:app --port 8001` (or let `make e2e` start one).
+
+```sh
+E2E_CONFIRM_REMOTE=1 \
+ENGINE_URL=https://<engine>.onrender.com \
+COUNSEL_URL=https://<counsel>.onrender.com \
+SHOPPER_URL=http://localhost:8001 \
+SYSTEM1_KEY=<value> SYSTEM3_KEY=<value> \
+GROQ_API_KEY=<local shopper key> \
+uv run python -m integration.e2e --seed-counsel
+```
+
+What it does, in order: registers this laptop's demo merchant key (`keys/system1-merchant`) with the
+hosted engine, the real happy path, the attack set, then a second honest purchase (Counsel's DEFEND case) and the
+wrong-size purchase (ALLOWED, PAID, with a Guardian variant advisory: Counsel's CONCEDE case), so
+the last two PAID payments are the two Counsel's demo scenarios use. `--seed-counsel` then POSTs
+Counsel's demo-scenarios endpoint and prints what Counsel recommended for both cases. Add
+`--no-payments` to skip the attack cases that are correctly ALLOWED.
+
+Notes: the hosted engine remembers the first merchant key it is given (write-once), so a second
+laptop or a lost `keys/` directory stops with the remedy
+(`scripts/register_merchant_key.py --rotate`). The run creates real PayPal SANDBOX payments (about
+$60 and $55) on the hosted ledger. Ids in the output are masked. A Counsel recommendation that is not
+DEFEND / CONCEDE_REMEDY is printed as a `FLAG` with the evidence it was given; see
+`docs/INTEGRATION_ISSUES.md` #16.
+
 ## 4. Re-recording the video
 
 `POST /v1/admin/reset-demo` wipes the engine's data and keys and starts a fresh ledger (only with
