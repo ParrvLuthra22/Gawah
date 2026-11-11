@@ -11,12 +11,22 @@ docs/INTEGRATION_ISSUES.md). ENGINE_URL / SHOPPER_URL override the default local
 What it does, in order:
   1. registers the demo merchant's public key with the engine (SYSTEM1_KEY);
   2. creates a mandate (SYSTEM3_KEY): $80, one category, one merchant, short expiry;
-  3. happy path: the shopper picks a product and signs a cart, the proposal goes to the engine,
-     and the engine must ALLOW and pay (status PAID, ledger PAYMENT_COMPLETED), then evidence verifies;
+  3. happy path: the shopper picks a product and signs a cart, the proposal goes to the engine
+     UNMODIFIED, and the engine must ALLOW and pay (status PAID, ledger PAYMENT_COMPLETED), then
+     evidence verifies. Against an engine with real PayPal (not env "test") it also requires a PayPal
+     order id and capture id, and refuses to run unless /health says card_configured;
   4. attacks: the four fixtures in system1/shopper/security/attack_simulation.py plus Guardian
      cases (over budget, wrong merchant, wrong category, expired mandate, reused mandate, replayed
      cart). Each gets a fresh mandate, so one result never depends on another;
   5. verifies the whole ledger chain and prints one table.
+
+`--phase happy` runs steps 1-3 only (what `make e2e E2E_MODE=real` does); `--phase attacks` runs
+steps 1, 2, 4 and 5 without the cases that need a paid mandate and, against real PayPal, without the
+one attack that is correctly ALLOWED (it would make a second real payment).
+
+Idempotent: re-registering the same merchant key is a no-op; a different key under the same merchant
+stops with the exact remedy. The shopper's merchant key lives in keys/system1-merchant (gitignored)
+unless MERCHANT_SIGNING_KEY_PATH says otherwise, so restarts reuse it.
 
 Exit code: 0 all expectations met; 1 an attack was ALLOWED that should have been blocked, or any
 other expectation failed; 2 the script could not run (engine down, unexpected HTTP error).
@@ -36,6 +46,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -46,6 +57,7 @@ from shopper.merchant.demo_merchant import DemoMerchantAdapter, MerchantProduct
 
 from integration import scenarios as sc
 
+DEFAULT_MERCHANT_KEYS = Path(__file__).resolve().parents[1] / "keys" / "system1-merchant"
 HAPPY_LEDGER_ORDER = ("MANDATE_CREATED", "PROPOSAL_RECEIVED", "DECISION_MADE",
                       "PAYMENT_STARTED", "PAYMENT_COMPLETED")
 
@@ -74,7 +86,7 @@ class Report:
     env: str = ""
     rows: list[Row] = field(default_factory=list)
     checks: list[tuple[str, bool, str]] = field(default_factory=list)  # name, ok, detail
-    known_issues: list[str] = field(default_factory=list)  # do not affect the exit code
+    real_payment: bool = False
     ledger: str = ""
 
     @property
@@ -102,6 +114,19 @@ def judge(expect: str, need: frozenset[str], decision: str, reasons: list[str]) 
     return "PASS" if not missing else f"FAIL: blocked without {sorted(missing)}"
 
 
+def mask(value: str | None) -> str:
+    """Show enough of an id to recognise it (first 4, last 3), never the whole thing."""
+    if not value:
+        return "-"
+    return value if len(value) <= 8 else f"{value[:4]}...{value[-3:]}"
+
+
+def fingerprint(pem: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(pem.strip().encode()).hexdigest()[:12]
+
+
 def _clip(text: str, n: int = 300) -> str:
     return text if len(text) <= n else text[:n] + "..."
 
@@ -120,12 +145,14 @@ class Runner:
         s3_key: str,
         merchant: DemoMerchantAdapter,
         expiry_s: int = 3,
+        phase: str = "all",
         out: Callable[[str], None] = print,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.engine, self.shopper = engine, shopper
         self._keys = {1: s1_key, 3: s3_key}
         self.merchant, self.expiry_s, self.out, self._sleep = merchant, expiry_s, out, sleep
+        self.phase = phase  # all | happy | attacks
         self.report = Report()
         self.run_id = uuid.uuid4().hex[:8]
 
@@ -163,15 +190,9 @@ class Runner:
         })
         return m["id"]
 
-    async def shopper_proposal(self, mandate_id: str, quantity: int = 1,
-                               raw: bool = False) -> dict[str, Any]:
-        """The honest path: the shopper's own checkout endpoint builds and signs the proposal.
-
-        WORKAROUND (docs/INTEGRATION_ISSUES.md #5): the shopper sets `product.id` to its internal
-        product id, but the Guardian (and the contract fixtures) expect the cart line's sku there,
-        so every unmodified shopper proposal is blocked as PRICE_MISMATCH. Unless `raw`, the id is
-        replaced by the cart sku here. Nothing else is touched and the cart signature is unaffected
-        (only the cart is signed)."""
+    async def shopper_proposal(self, mandate_id: str, quantity: int = 1) -> dict[str, Any]:
+        """The honest path: the shopper's own checkout endpoint builds and signs the proposal. It is
+        posted exactly as returned (no field is rewritten here)."""
         r = await self.shop("/shopping/demo/checkout", {
             "message": sc.SHOPPER_MESSAGE, "mandate_id": mandate_id,
             "agent_id": "e2e-shopper", "quantity": quantity})
@@ -180,10 +201,7 @@ class Runner:
         body = r.json()
         if not (body.get("purchase_ready") and body.get("proposal")):
             raise E2EError(f"shopper made no proposal: {_clip(str(body.get('explanation')))}")
-        proposal = body["proposal"]
-        if not raw:
-            proposal["product"]["id"] = proposal["signed_cart"]["line_items"][0]["sku"]
-        return proposal
+        return body["proposal"]
 
     def crafted_proposal(self, mandate_id: str, product: MerchantProduct, rationale: str,
                          quantity: int = 1) -> dict[str, Any]:
@@ -229,30 +247,41 @@ class Runner:
         rep = self.report
         health = await self._health()
         rep.mock, rep.env = bool(health.get("mock")), str(health.get("env", ""))
+        rep.real_payment = not rep.mock and rep.env != "test"
+        if rep.real_payment and not health.get("card_configured"):
+            raise E2EError(
+                "refusing to run: the engine is in real mode but /health says card_configured is "
+                "false, so no payment could complete. Set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and "
+                "PAYPAL_CARD_NUMBER/EXPIRY/CVV in the engine's environment (see .env.example).")
         mode = ("MOCK engine: fixtures only, wire-format check, nothing is proven" if rep.mock
                 else f"real engine, env={rep.env or 'dev'}, "
-                + ("SIMULATED PayPal" if rep.env == "test" else "PayPal sandbox"))
-        self.out(f"engine: {mode}\n")
+                + ("SIMULATED PayPal" if rep.env == "test" else "REAL PayPal sandbox (card route)"))
+        self.out(f"engine: {mode}; semantic check: {health.get('semantic')} "
+                 f"({health.get('model') or 'keyword fallback'}); phase: {self.phase}\n")
 
         self.out("1. register the demo merchant key")
         await self.register_merchant()
         self.out("2. create the mandate")
         mandate_a = await self.new_mandate("happy")
         self.out(f"  {mandate_a}: ${sc.BUDGET_MINOR // 100} {sc.CURRENCY}, {sc.CATEGORY}, "
-                 f"{sc.MERCHANT_ID}, expires in 10 minutes")
-        # created now, checked last: the only way to test expiry is to let it expire
-        expiring = await self.new_mandate("expiring", ttl_s=self.expiry_s)
-        expiry_at = asyncio.get_running_loop().time() + self.expiry_s + 1.5
+                 f"{sc.MERCHANT_ID} (allowed), expires in 10 minutes")
 
-        self.out("3. happy path: shopper -> proposal -> Guardian -> payment")
-        happy_proposal = await self.happy_path(mandate_a)
+        happy_proposal = None
+        if self.phase in ("all", "happy"):
+            self.out("3. happy path: shopper -> proposal -> Guardian -> payment")
+            happy_proposal = await self.happy_path(mandate_a)
 
-        self.out("4. attacks and Guardian cases (a fresh mandate for each)")
-        await self.attacks()
-        await self.guardian_cases(mandate_a, happy_proposal)
-        await self._sleep(max(0.0, expiry_at - asyncio.get_running_loop().time()))
-        body = await self.submit(await self.shopper_proposal(expiring))
-        self.record("guardian: expired mandate", "proposal prepared", body, "BLOCK", {"MANDATE_EXPIRED"})
+        if self.phase in ("all", "attacks"):
+            self.out("4. attacks and Guardian cases (a fresh mandate for each)")
+            # created now, checked last: the only way to test expiry is to let it expire
+            expiring = await self.new_mandate("expiring", ttl_s=self.expiry_s)
+            expiry_at = asyncio.get_running_loop().time() + self.expiry_s + 1.5
+            await self.attacks()
+            await self.guardian_cases(mandate_a, happy_proposal)
+            await self._sleep(max(0.0, expiry_at - asyncio.get_running_loop().time()))
+            body = await self.submit(await self.shopper_proposal(expiring))
+            self.record("guardian: expired mandate", "proposal prepared", body, "BLOCK",
+                        {"MANDATE_EXPIRED"})
 
         self.out("5. ledger")
         await self.verify_ledger()
@@ -268,16 +297,32 @@ class Runner:
         return r.json()
 
     async def register_merchant(self) -> None:
+        """Idempotent: the same key again is fine; a different key stops with the remedy."""
         key = self.merchant.merchant_key(sc.MERCHANT_ID)
         try:
             await self.api(1, "POST", "/v1/merchants", key.model_dump(mode="json"))
         except E2EError as exc:
-            if "CONFLICT" in str(exc):
-                raise E2EError(
-                    "the engine already has a different key for demo-sports (is its database "
-                    "left over from another run? make e2e uses a fresh one): " + str(exc)) from exc
-            raise
-        self.out(f"  {sc.MERCHANT_ID} key {key.key_id} registered (public key only)")
+            if " -> 409" not in str(exc):
+                raise
+            theirs = await self.api(1, "GET", f"/v1/merchants/{sc.MERCHANT_ID}/public-key")
+            if theirs["key_id"] == key.key_id and \
+                    fingerprint(theirs["public_key_pem"]) == fingerprint(key.public_key_pem):
+                self.out(f"  {sc.MERCHANT_ID} key {key.key_id} already registered, same key: continuing")
+                return
+            raise E2EError(
+                f"the engine already holds a DIFFERENT key for {sc.MERCHANT_ID}: engine has "
+                f"{theirs['key_id']} (fingerprint {fingerprint(theirs['public_key_pem'])}), the shopper "
+                f"signs with {key.key_id} (fingerprint {fingerprint(key.public_key_pem)}). The API never "
+                "replaces a merchant key. Fix, either:\n"
+                "  1. point the shopper and this script at the key directory the engine was set up "
+                "with (MERCHANT_SIGNING_KEY_PATH, default keys/system1-merchant), or\n"
+                "  2. rotate to a new key id in the engine's database (stop nothing; SQLite is shared):\n"
+                "       uv run python scripts/register_merchant_key.py --rotate\n"
+                "     run it with the engine's DATABASE_URL; the running shopper picks the new key up, or\n"
+                "  3. on a local throwaway engine, delete its database file and start it again; on the "
+                "hosted demo, POST /v1/admin/reset-demo.") from exc
+        self.out(f"  {sc.MERCHANT_ID} key {key.key_id} registered, fingerprint "
+                 f"{fingerprint(key.public_key_pem)} (public key only)")
 
     async def happy_path(self, mandate_id: str) -> dict[str, Any]:
         agent = await self.shop("/shopping/agent", {"message": sc.SHOPPER_MESSAGE})
@@ -285,7 +330,7 @@ class Runner:
             raise E2EError(f"shopper /shopping/agent -> {agent.status_code}: {_clip(agent.text)}")
         chosen = (agent.json().get("selected_product") or {}).get("id")
         self.out(f"  agent selected: {chosen}")
-        await self.known_issue_probe(mandate_id)
+        await self.unmodified_probe(mandate_id)
         proposal = await self.shopper_proposal(mandate_id)
         body = await self.submit(proposal)
         row = self.record("happy path", "proposal prepared", body, "ALLOW", is_attack=False)
@@ -296,7 +341,15 @@ class Runner:
         self.check("agent chose the catalog's product", chosen == sc.HAPPY_PRODUCT_ID, str(chosen))
         self.check("payment is PAID for the cart total",
                    pay.get("status") == "PAID" and pay.get("amount_minor") == expected_minor,
-                   f"{pay.get('status')} {pay.get('amount_minor')} (cart {expected_minor})")
+                   f"{pay.get('status')} {pay.get('amount_minor')} (cart {expected_minor})"
+                   + (f"; reason: {pay.get('failure_reason')}" if pay.get("failure_reason") else ""))
+        if self.report.real_payment:
+            order, capture = pay.get("paypal_order_id"), pay.get("paypal_capture_id")
+            self.check("PayPal order id and capture id recorded", bool(order and capture),
+                       f"order {mask(order)}, capture {mask(capture)}")
+            self.check("these are real PayPal ids, not the simulator's",
+                       bool(order and capture) and not str(order).startswith(("ORDER0", "FAKE")),
+                       "sandbox ids")
         if row.verdict == "PASS" and pay:
             entries = await self.api(3, "GET", f"/v1/ledger?mandate_id={mandate_id}")
             types = [e["type"] for e in entries]
@@ -312,19 +365,13 @@ class Runner:
                        ", ".join(f"{c['name']}={'ok' if c['ok'] else 'BAD'}" for c in v["checks"]))
         return proposal
 
-    async def known_issue_probe(self, mandate_id: str) -> None:
-        """Dry run (no payment, no ledger write) of the shopper's UNMODIFIED proposal."""
+    async def unmodified_probe(self, mandate_id: str) -> None:
+        """Dry run (no payment, no ledger write): the shopper's proposal must pass the Guardian as is."""
         if self.report.mock:
             return
-        raw = await self.shopper_proposal(mandate_id, raw=True)
-        dec = await self.api(3, "POST", "/v1/guardian/check", raw)
-        if dec["verdict"] == "ALLOW":
-            self.out("  shopper's unmodified proposal passes the Guardian (issue #5 is fixed)")
-            return
-        msg = (f"#5 the shopper's unmodified proposal is {dec['verdict']} "
-               f"{','.join(dec['reasons'])} (product.id is not the cart sku); worked around here")
-        self.report.known_issues.append(msg)
-        self.out(f"  [KNOWN ISSUE] {msg}")
+        dec = await self.api(3, "POST", "/v1/guardian/check", await self.shopper_proposal(mandate_id))
+        self.check("shopper's unmodified proposal passes the Guardian (dry run)",
+                   dec["verdict"] == "ALLOW", f"{dec['verdict']} {','.join(dec['reasons']) or '-'}")
 
     async def shopper_attack_outcome(self, scenario_id: str) -> str:
         r = await self.shop("/shopping/test/attacks/run", {"scenario_id": scenario_id})
@@ -338,7 +385,7 @@ class Runner:
 
     async def attacks(self) -> None:
         spoof_text = sc.attack_description("authority_spoof")
-        # (scenario id, extra mandate args, product, rationale, expectation)
+        # (scenario id, product, rationale, expectation, required reason codes)
         cases = [
             ("over_budget", sc.attack_product("over_budget"), sc.attack_description("over_budget"),
              "BLOCK", {"OVER_BUDGET"}),
@@ -351,11 +398,15 @@ class Runner:
             ("authority_spoof", sc.attack_product("authority_spoof"), spoof_text, "ALLOW", set()),
         ]
         for sid, product, rationale, expect, need in cases:
+            if expect == "ALLOW" and self.report.real_payment and self.phase == "attacks":
+                self.out(f"  (skipped attack: {sid}: correctly ALLOWED, so it would make a second "
+                         "real PayPal payment; `make e2e` covers it with the simulated PayPal)")
+                continue
             outcome = await self.shopper_attack_outcome(sid)
             mandate = await self.new_mandate(sid)
             body = await self.submit(self.crafted_proposal(mandate, product, rationale))
             self.record(f"attack: {sid}", f"{outcome}; crafted", body, expect, need,
-                              is_attack=expect == "BLOCK")
+                        is_attack=expect == "BLOCK")
             if sid == "authority_spoof" and not self.report.mock:
                 echoed = spoof_text[:30].casefold() in body["decision"]["explanation"].casefold()
                 self.check("injected text had no effect on the decision", not echoed,
@@ -366,7 +417,7 @@ class Runner:
             mandate, sc.attack_product("over_budget"), spoof_text))
         self.record("attack: authority_spoof + $120", "crafted", body, "BLOCK", {"OVER_BUDGET"})
 
-    async def guardian_cases(self, mandate_a: str, happy_proposal: dict[str, Any]) -> None:
+    async def guardian_cases(self, mandate_a: str, happy_proposal: dict[str, Any] | None) -> None:
         # over budget: the real shopper, quantity 2 ($119.98 against $80)
         m = await self.new_mandate("over_budget")
         body = await self.submit(await self.shopper_proposal(m, quantity=2))
@@ -382,6 +433,8 @@ class Runner:
         earbuds = sc.catalog_product("tech-001")
         body = await self.submit(self.crafted_proposal(m, earbuds, "Better value than shoes."))
         self.record("guardian: wrong category", "crafted", body, "BLOCK", {"CATEGORY_MISMATCH"})
+        if happy_proposal is None:  # `--phase attacks`: no paid mandate or paid cart exists
+            return
         # reused mandate: it already paid for one pair, a second cart no longer fits
         body = await self.submit(await self.shopper_proposal(mandate_a))
         self.record("guardian: reused mandate (spent)", "proposal prepared", body, "BLOCK",
@@ -418,8 +471,6 @@ def print_table(report: Report, out: Callable[[str], None] = print) -> None:
         out("MOCK engine: results are fixtures, not Guardian decisions. Use the default `make e2e`.")
     elif report.env == "test":
         out("Payments above are SIMULATED (the engine's fake PayPal); attacker proposals are SIMULATED.")
-    for issue in report.known_issues:
-        out(f"KNOWN ISSUE {issue}")
     for row in report.allowed_attacks:
         out(f"!! ATTACK ALLOWED: {row.scenario}")
     out(f"ledger: {report.ledger or 'not checked'}")
@@ -443,7 +494,10 @@ async def amain(argv: list[str] | None = None) -> int:
     ap.add_argument("--engine-url", default=os.environ.get("ENGINE_URL", "http://localhost:8000"))
     ap.add_argument("--shopper-url", default=os.environ.get("SHOPPER_URL", "http://localhost:8001"))
     ap.add_argument("--expiry-seconds", type=int, default=3)
+    ap.add_argument("--phase", choices=("all", "happy", "attacks"), default="all")
     args = ap.parse_args(argv)
+    # The shopper's merchant key persists here (gitignored) unless the environment says otherwise.
+    os.environ.setdefault("MERCHANT_SIGNING_KEY_PATH", str(DEFAULT_MERCHANT_KEYS))
     try:
         s1, s3 = _keys()
         # Settings needs a Groq key to construct; this adapter only signs and never calls Groq.
@@ -451,7 +505,7 @@ async def amain(argv: list[str] | None = None) -> int:
         async with httpx.AsyncClient(base_url=args.engine_url.rstrip("/"), timeout=60) as engine, \
                 httpx.AsyncClient(base_url=args.shopper_url.rstrip("/"), timeout=90) as shopper:
             runner = Runner(engine, shopper, s1_key=s1, s3_key=s3, merchant=merchant,
-                            expiry_s=args.expiry_seconds)
+                            expiry_s=args.expiry_seconds, phase=args.phase)
             report = await runner.run()
     except E2EError as exc:
         print(f"\ne2e could not run: {exc}", file=sys.stderr)

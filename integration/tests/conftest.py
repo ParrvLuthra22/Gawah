@@ -16,7 +16,7 @@ from gawah_engine.main import app as engine_app
 from shopper.config import Settings
 from shopper.merchant.demo_merchant import DemoMerchantAdapter
 
-from integration.stubs import install_stubs, remove_stubs
+from integration.stubs import install_stubs, remove_stubs, semantic_checker_factory
 
 S1_KEY, S3_KEY = "test-system1-key", "test-system3-key"
 _SECRETS = ("paypal_client_id", "paypal_client_secret", "paypal_card_number", "paypal_card_expiry",
@@ -52,6 +52,9 @@ def engine_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "ledger_signing_key_path", str(tmp_path / "engine-keys"))
     monkeypatch.setattr(settings, "mandate_signing_key_path", str(tmp_path / "engine-keys"))
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0)
+    # The Guardian fails closed without a model: answer its category check with the SIMULATED one.
+    monkeypatch.setattr(services_module, "SemanticChecker",
+                        semantic_checker_factory(services_module.SemanticChecker))
     return settings
 
 

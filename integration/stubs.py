@@ -1,4 +1,8 @@
-"""A SIMULATED Groq for the shopper, so the end-to-end flow needs no network and no API key.
+"""SIMULATED Groq, so the end-to-end flow needs no network and no API key. Two stand-ins:
+
+* `StubGroqClient`: the shopper's model (intent parsing and the tool-calling agent).
+* `StubSemanticModel`: the engine Guardian's category check, which now fails closed when no model
+  answers, so a run without Groq needs a model that does.
 
 `StubGroqClient` replaces `shopper.integrations.groq_client.GroqIntentClient` at its seam (the two
 `create_*_completion` methods), so the shopper's own intent parser, discovery filter, tool-calling
@@ -64,6 +68,52 @@ class StubGroqClient:
             "selected_product_id": best["id"] if best else None,
             "explanation": "SIMULATED model: the cheapest product that meets every constraint.",
         })}
+
+
+STUB_SEMANTIC_MODEL = "simulated-groq-stub"
+_TITLE_RE = re.compile(r"title=(.*?) \| variant=")
+
+
+def footwear_titles() -> frozenset[str]:
+    """Titles the stub model knows are footwear: System 1's shoe catalog plus the honest title the
+    attack fixtures reuse. Everything else (electronics, groceries, the substituted product) is a
+    mismatch. Read from System 1's files so a catalog change is picked up."""
+    from integration import scenarios as sc
+
+    shoes = {r["title"] for r in sc.provider_catalog().values() if "shoe" in r["category"].casefold()}
+    shoes |= {sc.attack_product(i).title for i in ("over_budget", "wrong_merchant", "authority_spoof")}
+    return frozenset(shoes)
+
+
+class StubSemanticModel:
+    """SIMULATED model for the Guardian's `SemanticChecker(client=...)` seam: deterministic,
+    never opens a connection. `match` only if every cart line title is a known footwear title."""
+
+    def __init__(self) -> None:
+        self._shoes = footwear_titles()
+
+    def __call__(self, _model: str, messages: list[dict[str, str]]) -> str:
+        titles = _TITLE_RE.findall(messages[-1]["content"])
+        ok = bool(titles) and all(t in self._shoes for t in titles)
+        return json.dumps({"category_match": "match" if ok else "mismatch",
+                           "variant_issues": [], "confidence": 0.95})
+
+
+def semantic_checker_factory(real_cls):
+    """A drop-in for `gawah_engine.services.SemanticChecker` that always uses the stub model."""
+    def factory(path, api_key="", **kwargs):
+        kwargs.pop("models", None)
+        return real_cls(path, api_key, client=StubSemanticModel(), models=[STUB_SEMANTIC_MODEL],
+                        **kwargs)
+
+    return factory
+
+
+def install_engine_semantic_stub() -> None:
+    """For an engine PROCESS (integration/engine_stub_app.py). Tests use monkeypatch instead."""
+    from gawah_engine import services
+
+    services.SemanticChecker = semantic_checker_factory(services.SemanticChecker)
 
 
 def install_stubs(settings: Settings) -> None:
