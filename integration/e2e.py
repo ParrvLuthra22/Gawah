@@ -21,8 +21,9 @@ What it does, in order:
   5. verifies the whole ledger chain and prints one table.
 
 `--phase happy` runs steps 1-3 only (what `make e2e E2E_MODE=real` does); `--phase attacks` runs
-steps 1, 2, 4 and 5 without the cases that need a paid mandate and, against real PayPal, without the
-one attack that is correctly ALLOWED (it would make a second real payment).
+steps 1, 2, 4 and 5 without the two cases that need an already paid mandate (reused mandate,
+replayed cart). Against real PayPal the attack set makes ONE more real sandbox payment: the
+authority_spoof cart is compliant, so it is correctly ALLOWED and paid.
 
 Idempotent: re-registering the same merchant key is a no-op; a different key under the same merchant
 stops with the exact remedy. The shopper's merchant key lives in keys/system1-merchant (gitignored)
@@ -169,10 +170,20 @@ class Runner:
         return r.json()
 
     async def shop(self, path: str, body: dict[str, Any]) -> httpx.Response:
-        try:
-            return await self.shopper.post(path, json=body)
-        except httpx.HTTPError as exc:
-            raise E2EError(f"shopper unreachable on {path}: {type(exc).__name__}") from exc
+        """POST to the shopper. A real Groq key can hit its rate limit (the shopper answers 429, or
+        503 when the model is briefly unavailable); wait and retry a few times before giving up."""
+        for attempt in range(4):
+            try:
+                r = await self.shopper.post(path, json=body)
+            except httpx.HTTPError as exc:
+                raise E2EError(f"shopper unreachable on {path}: {type(exc).__name__}") from exc
+            if r.status_code not in (429, 503) or attempt == 3:
+                return r
+            wait = 15 * (attempt + 1)
+            self.out(f"  (shopper answered {r.status_code} on {path}: the model is rate limited; "
+                     f"waiting {wait}s, retry {attempt + 1}/3)")
+            await self._sleep(wait)
+        return r  # pragma: no cover
 
     def check(self, name: str, ok: bool, detail: str) -> None:
         self.report.checks.append((name, ok, detail))
@@ -398,10 +409,6 @@ class Runner:
             ("authority_spoof", sc.attack_product("authority_spoof"), spoof_text, "ALLOW", set()),
         ]
         for sid, product, rationale, expect, need in cases:
-            if expect == "ALLOW" and self.report.real_payment and self.phase == "attacks":
-                self.out(f"  (skipped attack: {sid}: correctly ALLOWED, so it would make a second "
-                         "real PayPal payment; `make e2e` covers it with the simulated PayPal)")
-                continue
             outcome = await self.shopper_attack_outcome(sid)
             mandate = await self.new_mandate(sid)
             body = await self.submit(self.crafted_proposal(mandate, product, rationale))

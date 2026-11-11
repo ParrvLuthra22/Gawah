@@ -2,8 +2,9 @@
 # Full demo rehearsal, in video order. Starts the engine (8000), shopper (8001), Counsel (8002) and
 # web (3000) (ENGINE_PORT, SHOPPER_PORT and WEB_PORT can be
 # overridden; Counsel is pinned to 8002 because system3/run_demo_scenarios.py hardcodes it), then runs:
-#   1. the REAL happy path (PayPal sandbox card route: one real $59.99 sandbox payment)
-#   2. the attack set (every attack and Guardian case that does not need a second real payment)
+#   1. the REAL happy path (PayPal sandbox card route: a real $59.99 sandbox payment)
+#   2. the attack set (all attacks and Guardian cases; the compliant authority_spoof cart is
+#      correctly ALLOWED and is the SECOND real sandbox payment, which Counsel's scenarios require)
 #   3. system3/run_demo_scenarios.py (Counsel's simulated dispute cases)
 #   4. the ledger tamper demo, on a COPY of the engine database
 # then prints the URLs to open. Everything is stopped on exit.
@@ -33,9 +34,14 @@ kill_tree() {
 }
 cleanup() {
   echo; echo "stopping everything..."
+  disown -a 2>/dev/null || true  # no 'Terminated' job notices
   for pid in "${PIDS[@]:-}"; do [ -n "$pid" ] && kill_tree "$pid"; done
   sleep 1
   for pid in "${PIDS[@]:-}"; do [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true; done
+  if [ "${#FAILED[@]}" -gt 0 ]; then  # keep the logs of a failed rehearsal (no keys are logged)
+    KEEP="${REHEARSE_LOG_DIR:-/tmp}/gawah-rehearsal-logs"; rm -rf "$KEEP"; mkdir -p "$KEEP"
+    cp "$WORK"/*.log "$KEEP"/ 2>/dev/null || true; echo "logs kept in $KEEP"
+  fi
   rm -rf "$WORK"
   echo "total rehearsal time: $((SECONDS - T0))s"
 }
@@ -64,6 +70,9 @@ DB="$WORK/rehearsal.db"
 ENGINE_KEYS="$WORK/engine-keys"
 COUNSEL_UV=(uv run --no-project --with-requirements requirements.txt --with-editable ../contract)
 
+# One value from .env, without echoing it (Counsel's AI step needs the Groq key; it reads no repo .env).
+env_value() { grep -E "^$1=" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true; }
+
 wait_for() { # url name log
   for _ in $(seq 1 120); do
     curl -fsS "$1" >/dev/null 2>&1 && return 0
@@ -86,8 +95,8 @@ COUNSEL_ENV=("DATABASE_URL=sqlite:///$WORK/counsel.db" "SYSTEM2_BASE_URL=$ENGINE
   "SYSTEM2_KEY=$SYSTEM3_KEY" "SYSTEM3_KEY=$SYSTEM3_KEY" ENABLE_SANDBOX_RESOLUTION=false)
 ( cd "$ROOT/system3" && env "${COUNSEL_ENV[@]}" "${COUNSEL_UV[@]}" python -m alembic upgrade head ) \
     >"$WORK/counsel-migrate.log" 2>&1 || { tail -n 15 "$WORK/counsel-migrate.log" >&2; exit 2; }
-( cd "$ROOT/system3" && exec env "${COUNSEL_ENV[@]}" "${COUNSEL_UV[@]}" python -m uvicorn \
-    counsel.main:app --host 127.0.0.1 --port "$COUNSEL_PORT" ) >"$WORK/counsel.log" 2>&1 &
+( cd "$ROOT/system3" && export GROQ_API_KEY="$(env_value GROQ_API_KEY)" && exec env "${COUNSEL_ENV[@]}" \
+    "${COUNSEL_UV[@]}" python -m uvicorn counsel.main:app --host 127.0.0.1 --port "$COUNSEL_PORT" ) >"$WORK/counsel.log" 2>&1 &
 PIDS+=($!)
 ( cd "$ROOT/web" && exec env "SYSTEM3_API_URL=http://127.0.0.1:$COUNSEL_PORT" "SYSTEM3_KEY=$SYSTEM3_KEY" \
     npx next dev --webpack --hostname 127.0.0.1 --port "$WEB_PORT" ) >"$WORK/web.log" 2>&1 &
@@ -99,8 +108,30 @@ wait_for "http://127.0.0.1:$WEB_PORT/" web "$WORK/web.log"
 curl -fsS "$ENGINE_URL/health" | "$PY" -c "import json,sys; h=json.load(sys.stdin); print('engine health: mock=%s env=%s card_configured=%s semantic=%s' % (h['mock'], h['env'], h['card_configured'], h['semantic']))"
 took
 
-step "warm the Guardian's semantic cache (real Groq) for this database"
-run "warm cache" "$PY" scripts/warm_semantic_cache.py --database-url "sqlite:///$DB"
+step "prepare the Guardian's semantic cache (so decisions are instant on camera)"
+# Copy the answers cached in ./gawah.db (warmed once against the real Groq by
+# scripts/warm_semantic_cache.py) so the rehearsal does not spend Groq's rate limit that the shopper
+# needs; if there are none, warm this database live.
+seeded="$("$PY" - "$ROOT/gawah.db" "$DB" <<'PYEOF'
+import sqlite3, sys
+src, dst = sys.argv[1:3]
+try:
+    conn = sqlite3.connect(dst)
+    conn.execute("ATTACH DATABASE ? AS warm", (src,))
+    conn.execute("INSERT OR REPLACE INTO semantic_cache SELECT * FROM warm.semantic_cache")
+    conn.commit()
+    print(conn.execute("SELECT COUNT(*) FROM semantic_cache").fetchone()[0])
+except sqlite3.Error:
+    print(0)
+PYEOF
+)"
+if [ "${seeded:-0}" -gt 0 ]; then
+  echo "  seeded $seeded cached Guardian answers from gawah.db (refresh: scripts/warm_semantic_cache.py)"
+  took
+else
+  echo "  nothing to copy; warming live against Groq"
+  run "warm cache" "$PY" scripts/warm_semantic_cache.py --database-url "sqlite:///$DB"
+fi
 
 step "1/4 real happy path (PayPal sandbox)"
 run "real happy path" "$PY" -m integration.e2e --phase happy
@@ -109,7 +140,19 @@ step "2/4 attack set"
 run "attack set" "$PY" -m integration.e2e --phase attacks
 
 step "3/4 Counsel demo scenarios (system3/run_demo_scenarios.py)"
-run "counsel scenarios" bash -c "cd '$ROOT/system3' && env 'SYSTEM3_KEY=$SYSTEM3_KEY' ${COUNSEL_UV[*]} python run_demo_scenarios.py"
+counsel_scenarios() {
+  ( cd "$ROOT/system3" && env "SYSTEM3_KEY=$SYSTEM3_KEY" "${COUNSEL_UV[@]}" python run_demo_scenarios.py )
+}
+# Counsel's AI step calls Groq right after the shopper and the Guardian have; if its answer is a
+# rate-limit failure the scenarios are idempotent, so wait and try once more.
+if counsel_scenarios; then took; else
+  echo "  first attempt failed; Counsel's own view of the analyses:"
+  curl -fsS -H "X-Gawah-Key: $SYSTEM3_KEY" "http://127.0.0.1:$COUNSEL_PORT/api/dashboard/counsel?days=30" \
+    | cut -c1-700 || true
+  echo; echo "  waiting 30s for the model's rate limit, then retrying once..."
+  sleep 30
+  if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
+fi
 
 step "4/4 ledger tamper demo (on a COPY of the engine database)"
 run "tamper demo" "$PY" scripts/tamper_demo.py --copy-of "$DB" --keys "$ENGINE_KEYS"
