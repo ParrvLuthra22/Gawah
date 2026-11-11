@@ -57,3 +57,12 @@ class Settings(BaseSettings):
 
     def database_engine(self):
         return create_engine(self.database_dsn, pool_pre_ping=True, hide_parameters=True)
+
+    @property
+    def local_sandbox_resolution(self) -> bool:
+        """Whether simulated refund actions may run against a local System 2 sandbox."""
+        return self.enable_sandbox_resolution and self.system2_base_url.host in {
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        }

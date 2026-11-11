@@ -73,7 +73,9 @@ def _dispute(db: Session, payment, scenario: str, reason: str) -> Dispute:
     return row
 
 
-def run(db: Session, system2: System2Client, groq: GroqCounsel) -> list[DemoScenario]:
+def run(
+    db: Session, system2: System2Client, groq: GroqCounsel, *, allow_simulated: bool = False
+) -> list[DemoScenario]:
     payments = [payment for payment in system2.list_payments() if payment.status == "PAID"]
     if len(payments) < 2:
         raise IntegrationError(
@@ -89,10 +91,14 @@ def run(db: Session, system2: System2Client, groq: GroqCounsel) -> list[DemoScen
         try:
             assemble_pack(db, system2, payment.id, dispute_id=dispute.id)
             analysis = analyze(db, groq, payment.id, dispute_id=dispute.id)
-            workflow_id = resolution_workflow.open_workflow(
-                db, Actor(id="demo-runner", role="reviewer"),
-                OpenWorkflow(dispute_id=dispute.id, assign_to_self=False), allow_simulated=True,
-            )
+            workflow_id = None
+            if allow_simulated:
+                workflow_id = resolution_workflow.open_workflow(
+                    db,
+                    Actor(id="demo-runner", role="reviewer"),
+                    OpenWorkflow(dispute_id=dispute.id, assign_to_self=False),
+                    allow_simulated=True,
+                )
             results.append(DemoScenario(
                 scenario, dispute.id, payment.id, analysis.analysis_status,
                 analysis.outcome.recommendation if analysis.outcome else None,

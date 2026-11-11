@@ -26,6 +26,7 @@ from .resolution import (
     disabled_reason,
     eligible_option,
     get_dispute,
+    simulated_system2_payment,
 )
 from .resolution_auth import Actor
 from .resolution_schemas import (
@@ -423,13 +424,29 @@ def prepare(
     note = evidence_note(body, evidence)
     db.expunge(dispute)
     db.rollback()
-    case = current_case(paypal, dispute)
-    option = eligible_option(system2, dispute, case, body.action)
+    if dispute.source == Source.SIMULATED_FIXTURE:
+        payment = simulated_system2_payment(system2, dispute)
+        option = eligible_option(system2, dispute, None, body.action)
+        if payment is None:
+            reject("ACTION_UNAVAILABLE", "System 2 has no real capture for this simulated dispute.")
+        provider_status, provider_stage, capture_id = (
+            "SIMULATED_SANDBOX",
+            "SYSTEM_2",
+            payment.paypal_capture_id,
+        )
+    else:
+        case = current_case(paypal, dispute)
+        option = eligible_option(system2, dispute, case, body.action)
+        provider_status, provider_stage, capture_id = (
+            case.status,
+            case.dispute_life_cycle_stage,
+            case.capture_id,
+        )
     plan = ActionPlan(
         option=option,
-        paypal_status=case.status,
-        paypal_stage=case.dispute_life_cycle_stage,
-        capture_id=case.capture_id,
+        paypal_status=provider_status,
+        paypal_stage=provider_stage,
+        capture_id=capture_id,
         payload=action_payload(option, note),
         evidence_ids=body.evidence_ids,
         override_reason=body.override_reason,
@@ -437,14 +454,14 @@ def prepare(
     lock(db)
     row = get_workflow(db, id, body.revision)
     require_fresh(db, row, get_dispute(db, row.dispute_id))
-    if conflicting_attempt(db, row.dispute_id, body.action, case.capture_id):
+    if conflicting_attempt(db, row.dispute_id, body.action, capture_id):
         reject(
             "ALREADY_ATTEMPTED", "A prior submission blocks this action. Review the case in PayPal."
         )
     row.plan = plan
     row.strategy = strategy
     row.approval_revision = None
-    row.paypal_status = case.status
+    row.paypal_status = provider_status
     row.paypal_checked_at = now()
     record(
         db,

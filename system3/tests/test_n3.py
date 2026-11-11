@@ -374,6 +374,26 @@ def test_unverified_primary_check_cannot_defend_unauthorised_case(db):
     assert assess_case(case, classify_evidence(case)).supported_outcome == "REQUEST_MORE_EVIDENCE"
 
 
+def test_blocked_guardian_decision_cannot_defend_unauthorised_case(db):
+    dispute = save_dispute(db, reason="UNAUTHORISED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PAID"
+    evidence[5]["payload"]["data"]["verdict"] = "BLOCK"
+    evidence[6]["payload"]["verdict"] = "BLOCK"
+    save_billing_pack(db, dispute, evidence)
+    case = load_case(db, PAYMENT_ID)
+    assert assess_case(case, classify_evidence(case)).supported_outcome == "REQUEST_MORE_EVIDENCE"
+
+
+def test_unpaid_payment_cannot_defend_unauthorised_case(db):
+    dispute = save_dispute(db, reason="UNAUTHORISED")
+    evidence = billing_evidence(dispute)
+    evidence[4]["payload"]["status"] = "PENDING"
+    save_billing_pack(db, dispute, evidence)
+    case = load_case(db, PAYMENT_ID)
+    assert assess_case(case, classify_evidence(case)).supported_outcome == "REQUEST_MORE_EVIDENCE"
+
+
 def test_verified_size_advisory_concedes_remedy(db):
     dispute = save_dispute(db, reason="MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED")
     evidence = billing_evidence(dispute)
@@ -416,10 +436,10 @@ def test_simulated_authorisation_defense_is_clearly_labelled(db):
     classification = classify_evidence(case)
     assessment = assess_case(case, classification)
     plan = ModelPlan(
-        recommendation="DEFEND",
+        recommendation="REQUEST_MORE_EVIDENCE",
         confidence=0.9,
-        reasoning_finding_ids=["AUTHORIZATION_CONSENT"],
-        draft_finding_ids=["AUTHORIZATION_CONSENT"],
+        reasoning_finding_ids=[],
+        draft_finding_ids=[],
     )
     outcome = draft(assessment, classification, plan, recommend(assessment, plan))
     assert outcome.recommendation == "DEFEND"
@@ -483,6 +503,8 @@ def test_groq_uses_structured_output_and_minimizes_case_data(db):
         assert data["response_format"]["json_schema"]["strict"]
         assert "do-not-send" not in data["messages"][1]["content"]
         assert "CAPTURE1" not in data["messages"][1]["content"]
+        assert "Guardian ALLOW" in data["messages"][0]["content"]
+        assert "AUTHORIZED_SIZE_MISMATCH" in data["messages"][0]["content"]
         return httpx.Response(
             200,
             json=provider_response(

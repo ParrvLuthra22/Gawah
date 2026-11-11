@@ -25,7 +25,7 @@ export type WorkflowRow = {
   recommendation: string; strategy: Strategy; status: WorkflowStatus;
   assigned_reviewer: string | null; deadline: string | null; updated_at: string;
 };
-export type Option = { action: Action; amount_minor: number | null; currency: string | null };
+export type Option = { action: Action; amount_minor: number | null; currency: string | null; label: string | null };
 export type Plan = {
   option: Option; paypal_status: string; paypal_stage: string | null; capture_id: string | null;
   payload: Record<string, unknown>; evidence_ids: string[]; override_reason: string | null;

@@ -144,7 +144,12 @@ def demo_scenarios(request: Request, db: DB):
     """Create idempotent internal demo cases; no PayPal action is submitted."""
     return [
         DemoScenarioResponse(**row.__dict__)
-        for row in demo.run(db, request.app.state.system2, request.app.state.groq_counsel)
+        for row in demo.run(
+            db,
+            request.app.state.system2,
+            request.app.state.groq_counsel,
+            allow_simulated=request.app.state.settings.local_sandbox_resolution,
+        )
     ]
 
 
@@ -164,8 +169,13 @@ def resolution_queue(db: DB, actor: ResolutionActor, filters: Annotated[QueueFil
 
 
 @router.post("/resolution/workflows", response_model=WorkflowDetail)
-def resolution_open(db: DB, actor: ResolutionActor, body: OpenWorkflow):
-    id = resolution_workflow.open_workflow(db, actor, body)
+def resolution_open(request: Request, db: DB, actor: ResolutionActor, body: OpenWorkflow):
+    id = resolution_workflow.open_workflow(
+        db,
+        actor,
+        body,
+        allow_simulated=request.app.state.settings.local_sandbox_resolution,
+    )
     return resolution_workflow.detail(db, actor, id)
 
 
