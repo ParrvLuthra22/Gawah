@@ -96,7 +96,7 @@ PIDS+=($!)
     "$PY" -m uvicorn shopper.main:app --host 127.0.0.1 --port "$SHOPPER_PORT" ) >"$WORK/shopper.log" 2>&1 &
 PIDS+=($!)
 COUNSEL_ENV=("DATABASE_URL=sqlite:///$WORK/counsel.db" "SYSTEM2_BASE_URL=$ENGINE_URL"
-  "SYSTEM2_KEY=$SYSTEM3_KEY" "SYSTEM3_KEY=$SYSTEM3_KEY" ENABLE_SANDBOX_RESOLUTION=false)
+  "SYSTEM2_KEY=$SYSTEM3_KEY" "SYSTEM3_KEY=$SYSTEM3_KEY" "ENABLE_SANDBOX_RESOLUTION=${ENABLE_SANDBOX_RESOLUTION:-false}")
 ( cd "$ROOT/system3" && env "${COUNSEL_ENV[@]}" "${COUNSEL_UV[@]}" python -m alembic upgrade head ) \
     >"$WORK/counsel-migrate.log" 2>&1 || { tail -n 15 "$WORK/counsel-migrate.log" >&2; exit 2; }
 ( cd "$ROOT/system3" && export GROQ_API_KEY="$(env_value GROQ_API_KEY)" && exec env "${COUNSEL_ENV[@]}" \
@@ -165,6 +165,10 @@ step "5/6 what Counsel recommended for the two cases"
 # prints Counsel's recommendation per case, and when it is not DEFEND / CONCEDE_REMEDY, the fields
 # Counsel was given and the rule that stopped it. A flag here is a finding, not a failed rehearsal.
 run "counsel recommendations" "$PY" -m integration.e2e --phase counsel-check --counsel-url "http://127.0.0.1:$COUNSEL_PORT"
+
+step "5b/6 probe: Counsel's reasons, the refund path, payment ordering"
+run "rehearse probe" env "ENGINE_URL=$ENGINE_URL" "COUNSEL_URL=http://127.0.0.1:$COUNSEL_PORT" \
+  "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/rehearse_probe.py
 
 step "6/6 ledger tamper demo (on a COPY of the engine database)"
 run "tamper demo" "$PY" scripts/tamper_demo.py --copy-of "$DB" --keys "$ENGINE_KEYS"
