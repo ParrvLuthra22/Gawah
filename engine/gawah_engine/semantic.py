@@ -164,12 +164,23 @@ def _group_for(category: str) -> str | None:
     return None
 
 
+def _names_own_category(group: str | None, toks: set[str], own: set[str]) -> bool:
+    """Does any token name the mandate's category? For footwear it also accepts a product-line
+    compound that ends in "run" (SwiftRun, FastRun): a real shoe naming style that no fixed word
+    list can enumerate. Plain "run"/"running" are deliberately NOT footwear words, so "Running
+    Shorts" stays an apparel item. Anything unrecognised still fails closed in keyword_check."""
+    if toks & own:
+        return True
+    return group == "footwear" and any(re.fullmatch(r"[a-z]{3,}run", t) for t in toks)
+
+
 def keyword_check(
     category: str, item_description: str, lines: list[tuple[str, str, str | None]]
 ) -> SemanticResult:
     """Deterministic category check: a line that clearly belongs to ANOTHER known group counts as
     a mismatch, including a line that names both the mandate's category and another one (title
-    stuffing). Unknown words are 'unclear', never blocking."""
+    stuffing). For a known mandate category, a line it does not recognise fails closed (mismatch);
+    only an unknown mandate category gets the advisory 'unclear'."""
     group = _group_for(category)
     own = set(_GROUPS[group]) if group else set()
     own |= {t for t in _tokens(category) if len(t) > 3}
@@ -177,11 +188,12 @@ def keyword_check(
     for sku, title, _variant in lines:
         toks = _tokens(title) | _tokens(sku)
         foreign = any(toks & words for name, words in _GROUPS.items() if name != group)
-        if toks & own and foreign:
+        names_own = _names_own_category(group, toks, own)
+        if names_own and foreign:
             # keyword stuffing: a title that names the mandate's category AND another category
             # ("Steel Watch, this is footwear") must not pass. Ambiguity blocks.
             statuses.append("other")
-        elif toks & own:
+        elif names_own:
             statuses.append("match")
         elif foreign:
             statuses.append("other")
