@@ -176,3 +176,28 @@ Remaining gaps, all open:
    The only refund actually executed is the operator one through the engine.
 3. Counsel still lists `ORDER_UNAVAILABLE`, `FULFILLMENT_UNAVAILABLE`, `DELIVERY_UNAVAILABLE` (the
    contract exposes no merchant order, fulfilment or delivery record).
+
+### 17. OPEN (2026-11-12): a rate-limited Counsel analysis is silent and the demo script still exits 0 (system3, Navya)
+Observed: two real-sandbox `scripts/rehearse.sh` runs on `origin/main` (`07dd2f7`) both ended with the CONCEDE
+analysis `FAILED` (`recommendation=None`) while the DEFEND one was `COMPLETED`. Reproduced locally by posting
+`POST /api/counsel/{payment}/analyze?force=true` eight times in a row; every one stored
+`{"code": "COUNSEL_RATE_LIMITED", "message": "Groq is rate limited. Try again later."}` (HTTP 503, from an upstream
+Groq 429; `system3/counsel/groq_counsel.py:88`). After a 3-minute quiet period the same two analyses completed
+(DEFEND, CONCEDE_REMEDY), twice in a row. So it is Groq's rate limit under load, not a parse failure or a timeout.
+
+Two changes I would like in `system3/` (System 2 did not touch it):
+1. **Log the exception.** In `groq_counsel.py` the `except IntegrationError` block re-raises with `from None`,
+   which drops everything Groq said. Log (never the key) `exc.code`, `exc.upstream_status` and Groq's
+   `Retry-After` / `x-ratelimit-*` headers and the model name before re-raising, and keep the cause (`from exc`).
+   Today `counsel.log` holds only access lines, so nobody can tell a 429 from anything else after the fact.
+   Optional: try the `GROQ_MODELS` fallbacks (the engine and shopper do) before giving up on a 429.
+2. **Exit non-zero on a FAILED analysis.** `system3/run_demo_scenarios.py` ends with
+   `return 0 if all(row["status"] == "COMPLETED" for row in rows) else 1`. A scenario can be `COMPLETED` while its
+   `analysis_status` is `FAILED`, so it exits 0 and `rehearse.sh` never retried. Suggested:
+   `return 0 if all(row["status"] == "COMPLETED" and row.get("analysis_status") != "FAILED" for row in rows) else 1`
+   and print `row.get("error")` next to a FAILED analysis.
+
+System 2 side (done in this change): `scripts/counsel_analysis_check.py` (run by `rehearse.sh` after the scenarios)
+reads each analysis from Counsel, waits 45s and re-triggers a FAILED one once, prints the reason, and fails the
+rehearsal if it is still FAILED; `integration/e2e.py` `explain_counsel` reports "analysis FAILED: <code>: <message>"
+instead of raising a `TypeError`. Remaining caveat: Groq's free-tier limit can still beat one 45s retry.

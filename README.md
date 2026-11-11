@@ -1,6 +1,6 @@
 # Gawah
 
-Gawah (Urdu/Hindi for "witness") is an authorization and dispute layer for AI agents that spend money through PayPal. An agent that shops for you needs a limit it cannot talk its way past, and a record you can trust when a charge is disputed. Gawah gives you both: the user signs a **mandate** (what may be bought, from whom, up to how much), the agent can only *propose* a purchase, a **Guardian** decides without reading anything the agent wrote, PayPal pays, every step lands in a signed, hash-chained **ledger**, and **Dispute Counsel** turns that ledger into evidence and a recommendation. Built for the PayPal AI Hackathon. The mandates are **AP2-inspired ES256 signed JSON mandates**, not an AP2 implementation.
+Gawah (Urdu/Hindi for "witness") is an authorization and dispute layer for AI agents that spend money through PayPal. An agent that shops for you needs a spending limit that does not depend on the agent's own words, and a tamper-evident record to review when a charge is disputed. Gawah aims at both: the user signs a **mandate** (what may be bought, from whom, up to how much), the agent can only *propose* a purchase, a **Guardian** decides without reading anything the agent wrote, PayPal pays, every step lands in a signed, hash-chained **ledger**, and **Dispute Counsel** turns that ledger into evidence and a recommendation. Built for the PayPal AI Hackathon. The mandates are **AP2-inspired ES256 signed JSON mandates**, not an AP2 implementation.
 
 ```mermaid
 flowchart LR
@@ -12,6 +12,19 @@ flowchart LR
   L --> C[Dispute Counsel<br/>System 3]
   C --> D[Dashboard<br/>Next.js]
 ```
+
+## Live demo
+
+- Dashboard (read-only, no login): https://gawah-web.onrender.com
+- Engine health: https://gawah-engine.onrender.com/health
+- Counsel health: https://gawah-counsel.onrender.com/api/health
+- Source: https://github.com/ParrvLuthra22/Gawah
+- Video: **VIDEO LINK TO BE ADDED**
+
+The hosted services run on a free tier: the **first load can take up to a minute** while they wake up, and all hosted data
+resets on restart. All money is **PayPal sandbox** money. The hosted dashboard is read-only and needs no login (anyone with
+the URL can open it). The shopping agent page (`/shop`) is **not hosted**: it can start a sandbox payment, so it runs only on
+a local development server.
 
 ## How it works
 
