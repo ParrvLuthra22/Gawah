@@ -35,7 +35,8 @@ def main() -> int:
     times = [p["created_at"] for p in pays]
     ordered = times == sorted(times)
     print(f"   {len(pays)} payments, created_at ascending: {ordered}")
-    paid = [p for p in pays if p["status"] == "PAID"]
+    # PAID, or REFUNDED by refund_demo.py (which runs right after Counsel's scenarios)
+    paid = [p for p in pays if p["status"] in ("PAID", "REFUNDED")]
     for label, p in (("second-to-last PAID (DEFEND)", paid[-2]), ("last PAID (CONCEDE)", paid[-1])):
         print(f"   {label}: {mask(p['id'])} {p['amount_minor']}c order {mask(p['paypal_order_id'])}")
 

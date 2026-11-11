@@ -10,7 +10,9 @@
 #      PAID payment, Counsel's CONCEDE case. Counsel's demo reads payments[-2:], so order matters
 #   4. system3/run_demo_scenarios.py (Counsel's simulated dispute cases), then a check of what
 #      Counsel recommended for the two cases (flagged, not fatal, when it is not DEFEND / CONCEDE)
-#   5. the ledger tamper demo, on a COPY of the engine database
+#   5. scripts/refund_demo.py: an operator refund of the CONCEDE payment through the engine
+#      (SANDBOX), right after Counsel's scenarios: budget restored, REFUNDED ledger entry
+#   6. the ledger tamper demo, on a COPY of the engine database
 # then prints the URLs to open. Everything is stopped on exit.
 #
 #   bash scripts/rehearse.sh            (or: make rehearse)
@@ -160,6 +162,9 @@ if counsel_scenarios; then took; else
   sleep 30
   if counsel_scenarios; then took; else echo "!! step failed: counsel scenarios"; FAILED+=("counsel scenarios"); took; fi
 fi
+
+step "4b/6 operator refund of the CONCEDE payment, via the engine (SANDBOX)"
+run "refund demo" env "ENGINE_URL=$ENGINE_URL" "SYSTEM3_KEY=$SYSTEM3_KEY" "$PY" scripts/refund_demo.py
 
 step "5/6 what Counsel recommended for the two cases"
 # prints Counsel's recommendation per case, and when it is not DEFEND / CONCEDE_REMEDY, the fields

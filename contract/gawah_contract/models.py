@@ -105,6 +105,11 @@ class GuardianDecision(_Model):
     reasons: list[ReasonCode]
     explanation: str
     checked_at: datetime
+    mandate_id: str | None = Field(
+        default=None,
+        description="The mandate the proposal was decided against (the proposal's mandate_id). "
+        "Optional so decisions stored before it existed still validate; set on every new decision.",
+    )
 
 
 class PaymentRecord(_Model):
