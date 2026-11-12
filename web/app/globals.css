@@ -152,3 +152,16 @@ select { padding: 8px; max-width: 100%; }
   .detail-layout { display: block; }
   .dashboard-columns, .dashboard-columns.dashboard-three { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* AI Shopper: reuses the existing panel/pill tokens; only layout helpers are added. */
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 18px 20px; }
+.shop-card { display: grid; gap: 8px; align-content: start; border: 1px solid var(--border, #dfe5ee); border-radius: 10px; padding: 16px; background: inherit; }
+.shop-card[data-best] { border-color: #2f9e6f; }
+.shop-card-top { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop-price { font-size: 20px; font-weight: 700; }
+.shop-attrs { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+.shop-attrs dt { color: var(--muted); font-size: 11px; font-weight: 600; }
+.shop-form { display: grid; gap: 12px; padding: 18px 20px; }
+.shop-form textarea, .shop-form input { border: 1px solid var(--border, #dfe5ee); border-radius: 8px; padding: 10px 12px; font: inherit; background: inherit; color: inherit; }
+.shop-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.shop-steps { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 20px 0; list-style: none; }
